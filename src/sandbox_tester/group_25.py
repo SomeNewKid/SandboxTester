@@ -67,7 +67,7 @@ _DEFAULT_METADATA_PROBES = [
 
 
 class G25_T01:
-    id = "T01"
+    id = "T15"
     title = "UDP send/receive"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -113,7 +113,7 @@ class G25_T01:
 
 
 class G25_T02:
-    id = "T02"
+    id = "T16"
     title = "ICMP ping / raw socket creation"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -159,7 +159,7 @@ class G25_T02:
 
 
 class G25_T03:
-    id = "T03"
+    id = "T17"
     title = "DNS over TCP vs UDP"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -216,7 +216,7 @@ class G25_T03:
 
 
 class G25_T04:
-    id = "T04"
+    id = "T18"
     title = "Connect to link-local metadata endpoint"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -226,8 +226,7 @@ class G25_T04:
     async def run_shell(self) -> InvocationResult:
         return await _run_shell_test(
             command_builder=lambda: _build_metadata_shell_command(
-                self._operating_system,
-                self._metadata_endpoint_url
+                self._operating_system, self._metadata_endpoint_url
             ),
             allowed_summary="Shell connected to a metadata endpoint.",
             denied_summary="Shell could not connect to a metadata endpoint.",
@@ -271,7 +270,7 @@ class G25_T04:
 
 
 class G25_T05:
-    id = "T05"
+    id = "T19"
     title = "Connect to allowed intranet target"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -327,8 +326,7 @@ class G25_T05:
             return InvocationResult(
                 outcome=Outcome.DENIED,
                 summary=(
-                    "Python runtime could not connect to the allowed intranet "
-                    "target."
+                    "Python runtime could not connect to the allowed intranet target."
                 ),
                 evidence=repr(error),
             )
@@ -341,7 +339,7 @@ class G25_T05:
 
 
 class G25_T06:
-    id = "T06"
+    id = "T20"
     title = "Connect to denied intranet target"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -397,8 +395,7 @@ class G25_T06:
             return InvocationResult(
                 outcome=Outcome.DENIED,
                 summary=(
-                    "Python runtime could not connect to the denied intranet "
-                    "target."
+                    "Python runtime could not connect to the denied intranet target."
                 ),
                 evidence=repr(error),
             )
@@ -411,7 +408,7 @@ class G25_T06:
 
 
 class G25_T07:
-    id = "T07"
+    id = "T21"
     title = "Listen on loopback interface"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -465,7 +462,7 @@ class G25_T07:
 
 
 class G25_T08:
-    id = "T08"
+    id = "T22"
     title = "Listen on public/all interfaces"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -519,7 +516,7 @@ class G25_T08:
 
 
 class G25_T09:
-    id = "T09"
+    id = "T23"
     title = "Bind Linux privileged loopback port"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -573,8 +570,7 @@ class G25_T09:
             return InvocationResult(
                 outcome=Outcome.DENIED,
                 summary=(
-                    "Python runtime could not bind a Linux privileged loopback "
-                    "port."
+                    "Python runtime could not bind a Linux privileged loopback port."
                 ),
                 evidence=repr(error),
             )
@@ -587,7 +583,7 @@ class G25_T09:
 
 
 class G25_T10:
-    id = "T10"
+    id = "T24"
     title = "Detect outbound proxy configuration"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -643,18 +639,7 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
         id="G25",
         title="Network Policy",
-        tests=[
-            G25_T01(capability_context),
-            G25_T02(capability_context),
-            G25_T03(capability_context),
-            G25_T04(capability_context),
-            G25_T05(capability_context),
-            G25_T06(capability_context),
-            G25_T07(capability_context),
-            G25_T08(capability_context),
-            G25_T09(capability_context),
-            G25_T10(capability_context),
-        ],
+        tests=[],
     )
 
 
@@ -804,8 +789,7 @@ def _build_proxy_detection_shell_command(
 
 def _build_windows_proxy_detection_shell_command() -> list[str]:
     proxy_names = ", ".join(
-        _quote_powershell_string(name)
-        for name in _PROXY_ENVIRONMENT_VARIABLES
+        _quote_powershell_string(name) for name in _PROXY_ENVIRONMENT_VARIABLES
     )
     script = f"""
 $ErrorActionPreference = 'Stop'
@@ -1006,7 +990,7 @@ for port in {port_values}; do
         exit 0
     fi
 done
-echo "host=$host; ports=[{','.join(str(port) for port in ports)}]; connected=False"
+echo "host=$host; ports=[{",".join(str(port) for port in ports)}]; connected=False"
 exit 1
 """
     return ["sh", "-c", script]
@@ -1257,8 +1241,7 @@ def _build_dns_query_packet(domain: str) -> bytes:
     transaction_id = random.randint(0, 65535)
     header = struct.pack("!HHHHHH", transaction_id, 0x0100, 1, 0, 0, 0)
     question = b"".join(
-        bytes([len(label)]) + label.encode("ascii")
-        for label in domain.split(".")
+        bytes([len(label)]) + label.encode("ascii") for label in domain.split(".")
     )
     question += b"\x00"
     question += struct.pack("!HH", 1, 1)
@@ -1376,9 +1359,7 @@ def _detect_proxy_configuration_with_python(
     operating_system: OperatingSystem,
 ) -> str:
     proxy_names = [
-        name
-        for name in _PROXY_ENVIRONMENT_VARIABLES
-        if os.environ.get(name)
+        name for name in _PROXY_ENVIRONMENT_VARIABLES if os.environ.get(name)
     ]
 
     if operating_system == OperatingSystem.WINDOWS:
@@ -1410,10 +1391,7 @@ def _detect_winhttp_proxy() -> tuple[bool, bool]:
         return False, False
 
     output = f"{completed.stdout}\n{completed.stderr}".lower()
-    proxy_present = (
-        "direct access" not in output
-        and "no proxy server" not in output
-    )
+    proxy_present = "direct access" not in output and "no proxy server" not in output
 
     return True, proxy_present
 

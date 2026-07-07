@@ -94,7 +94,7 @@ _CLOUD_ENVIRONMENT_NAMES = [
 
 
 class G23_T01:
-    id = "T01"
+    id = "T10"
     title = "Detect container / VM / cloud runtime markers"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -178,7 +178,7 @@ class G23_T01:
 
 
 class G23_T02:
-    id = "T02"
+    id = "T11"
     title = "Read Linux cgroup and namespace status"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -274,7 +274,7 @@ class G23_T02:
 
 
 class G23_T03:
-    id = "T03"
+    id = "T12"
     title = "Read Linux confinement status"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -368,7 +368,7 @@ class G23_T03:
 
 
 class G23_T04:
-    id = "T04"
+    id = "T13"
     title = "Detect effective Linux capabilities"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -464,7 +464,7 @@ class G23_T04:
 
 
 class G23_T05:
-    id = "T05"
+    id = "T14"
     title = "Detect Windows integrity and containment status"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -489,8 +489,7 @@ class G23_T05:
                 return InvocationResult(
                     outcome=Outcome.NOT_APPLICABLE,
                     summary=(
-                        "Windows integrity and containment status is not "
-                        "applicable."
+                        "Windows integrity and containment status is not applicable."
                     ),
                     evidence=_failure_evidence(completed, combined_output),
                 )
@@ -498,8 +497,7 @@ class G23_T05:
             return InvocationResult(
                 outcome=Outcome.DENIED,
                 summary=(
-                    "Shell could not detect Windows integrity and containment "
-                    "status."
+                    "Shell could not detect Windows integrity and containment status."
                 ),
                 evidence=_failure_evidence(completed, combined_output),
             )
@@ -532,9 +530,7 @@ class G23_T05:
         if self._operating_system == OperatingSystem.LINUX:
             return InvocationResult(
                 outcome=Outcome.NOT_APPLICABLE,
-                summary=(
-                    "Windows integrity and containment status is not applicable."
-                ),
+                summary=("Windows integrity and containment status is not applicable."),
             )
 
         try:
@@ -545,8 +541,7 @@ class G23_T05:
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary=(
-                    "Python runtime detected Windows integrity and containment "
-                    "status."
+                    "Python runtime detected Windows integrity and containment status."
                 ),
                 evidence=evidence,
             )
@@ -571,7 +566,7 @@ class G23_T05:
 
 
 class G23_T06:
-    id = "T06"
+    id = "T15"
     title = "Detect host identity and domain visibility"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -594,9 +589,7 @@ class G23_T06:
 
             return InvocationResult(
                 outcome=Outcome.DENIED,
-                summary=(
-                    "Shell could not detect host identity and domain visibility."
-                ),
+                summary=("Shell could not detect host identity and domain visibility."),
                 evidence=_failure_evidence(completed, combined_output),
             )
         except PermissionError as error:
@@ -662,14 +655,7 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
         id="G23",
         title="Sandbox Identity",
-        tests=[
-            G23_T01(capability_context),
-            G23_T02(capability_context),
-            G23_T03(capability_context),
-            G23_T04(capability_context),
-            G23_T05(capability_context),
-            G23_T06(capability_context),
-        ],
+        tests=[],
     )
 
 
@@ -986,8 +972,7 @@ printf __PRINTF_FORMAT__ \
 
 def _build_linux_host_identity_command() -> list[str]:
     printf_format = (
-        "hostname=%s; fqdn=%s; machine_id_present=%s; "
-        "domain_config_present=[%s]\\n"
+        "hostname=%s; fqdn=%s; machine_id_present=%s; domain_config_present=[%s]\\n"
     )
     script = """
 set -u
@@ -1129,9 +1114,7 @@ def _detect_windows_runtime_markers(cloud_environment_names: list[str]) -> str:
 
 def _detect_linux_runtime_markers(cloud_environment_names: list[str]) -> str:
     container_markers = [
-        str(path)
-        for path in _LINUX_CONTAINER_MARKERS
-        if path.exists()
+        str(path) for path in _LINUX_CONTAINER_MARKERS if path.exists()
     ]
     cgroup_sample = _read_text_sample(_LINUX_CGROUP_PATH)
     product_name = _read_text_sample(_LINUX_PRODUCT_NAME_PATH)
@@ -1151,8 +1134,7 @@ def _detect_cgroup_namespace_with_python() -> str:
     cgroup_sample = _read_text_sample(_LINUX_SELF_CGROUP_PATH)
     namespaces = _read_linux_namespaces()
     namespace_evidence = ",".join(
-        f"{name}:{target}"
-        for name, target in namespaces.items()
+        f"{name}:{target}" for name, target in namespaces.items()
     )
 
     return f"cgroup={cgroup_sample}; namespaces=[{namespace_evidence}]"
@@ -1392,8 +1374,7 @@ def _detect_linux_host_identity_with_python() -> str:
     node = platform.uname().node
     machine_id_present = any(path.exists() for path in _LINUX_MACHINE_ID_PATHS)
     readable_machine_id = any(
-        path.is_file() and os.access(path, os.R_OK)
-        for path in _LINUX_MACHINE_ID_PATHS
+        path.is_file() and os.access(path, os.R_OK) for path in _LINUX_MACHINE_ID_PATHS
     )
     readable_domain_config = [
         str(path)

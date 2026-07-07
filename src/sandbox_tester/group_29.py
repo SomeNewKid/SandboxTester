@@ -23,7 +23,7 @@ _AI_CREDENTIAL_ENVIRONMENT_VARIABLES = [
 
 
 class G29_T01:
-    id = "T01"
+    id = "T05"
     title = "Access model/API credentials in environment/config"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -96,8 +96,7 @@ class G29_T01:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary=(
-                        "Python runtime detected AI credential environment "
-                        "variables."
+                        "Python runtime detected AI credential environment variables."
                     ),
                     evidence=_credential_name_evidence(credential_names),
                 )
@@ -131,9 +130,7 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
         id="G29",
         title="AI-Agent Specific But Still Sandbox-Relevant",
-        tests=[
-            G29_T01(capability_context),
-        ],
+        tests=[],
     )
 
 
@@ -164,7 +161,7 @@ def _build_shell_ai_credential_environment_command(
             f"$names = @({names}); "
             "$present = @(); "
             "foreach ($name in $names) { "
-            "if (Test-Path \"Env:$name\") { $present += $name } "
+            'if (Test-Path "Env:$name") { $present += $name } '
             "} "
             "if ($present.Count -gt 0) { "
             "Write-Output ('names=' + ($present -join ',')) "
@@ -181,18 +178,13 @@ def _build_shell_ai_credential_environment_command(
         )
     script = "\n".join(checks)
     script = (
-        f"present=$({script}); "
-        '[ -n "$present" ] && printf \'names=%s\\n\' "$present"'
+        f'present=$({script}); [ -n "$present" ] && printf \'names=%s\\n\' "$present"'
     )
     return ["sh", "-c", script]
 
 
 def _find_ai_credential_environment_names() -> list[str]:
-    return [
-        name
-        for name in _AI_CREDENTIAL_ENVIRONMENT_VARIABLES
-        if name in os.environ
-    ]
+    return [name for name in _AI_CREDENTIAL_ENVIRONMENT_VARIABLES if name in os.environ]
 
 
 def _credential_name_evidence(credential_names: list[str]) -> str:

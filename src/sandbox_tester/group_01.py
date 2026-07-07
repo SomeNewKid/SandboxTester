@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .group_23 import G23_T01, G23_T02, G23_T03, G23_T04, G23_T05, G23_T06
+from .group_24 import G24_T02
 from .models import InvocationResult, Outcome
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
@@ -747,5 +749,12 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G01_T07(capability_context),
             G01_T08(capability_context),
             G01_T09(capability_context),
+            G23_T01(capability_context),
+            G23_T02(capability_context),
+            G23_T03(capability_context),
+            G23_T04(capability_context),
+            G23_T05(capability_context),
+            G23_T06(capability_context),
+            G24_T02(capability_context),
         ],
     )

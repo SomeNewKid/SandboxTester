@@ -196,9 +196,7 @@ class G16_T06:
     async def run_shell(self) -> InvocationResult:
         return await _run_shell_mariadb_count_items(
             _MARIADB_ALLOWED_DATABASE,
-            allowed_summary=(
-                "Shell read MariaDB table rows from the allowed schema."
-            ),
+            allowed_summary=("Shell read MariaDB table rows from the allowed schema."),
             denied_summary=(
                 "Shell could not read MariaDB table rows from the allowed schema."
             ),
@@ -307,8 +305,7 @@ class G16_T10:
         return await _run_shell_mariadb_insert_and_update_item(
             _MARIADB_ALLOWED_DATABASE,
             allowed_summary=(
-                "Shell inserted and updated a MariaDB table row in the allowed "
-                "schema."
+                "Shell inserted and updated a MariaDB table row in the allowed schema."
             ),
             denied_summary=(
                 "Shell could not insert and update a MariaDB table row in the "
@@ -338,8 +335,7 @@ class G16_T11:
         return await _run_shell_mariadb_insert_and_update_item(
             _MARIADB_DENIED_DATABASE,
             allowed_summary=(
-                "Shell inserted and updated a MariaDB table row in the denied "
-                "schema."
+                "Shell inserted and updated a MariaDB table row in the denied schema."
             ),
             denied_summary=(
                 "Shell could not insert and update a MariaDB table row in the "
@@ -400,8 +396,7 @@ class G16_T13:
         return await _run_shell_mariadb_insert_and_delete_item(
             _MARIADB_DENIED_DATABASE,
             allowed_summary=(
-                "Shell inserted and deleted a MariaDB table row from the denied "
-                "schema."
+                "Shell inserted and deleted a MariaDB table row from the denied schema."
             ),
             denied_summary=(
                 "Shell could not insert and delete a MariaDB table row from the "
@@ -430,9 +425,7 @@ class G16_T14:
     async def run_shell(self) -> InvocationResult:
         return await _run_shell_mariadb_count_active_items_view(
             _MARIADB_ALLOWED_DATABASE,
-            allowed_summary=(
-                "Shell read MariaDB view rows from the allowed schema."
-            ),
+            allowed_summary=("Shell read MariaDB view rows from the allowed schema."),
             denied_summary=(
                 "Shell could not read MariaDB view rows from the allowed schema."
             ),
@@ -488,8 +481,7 @@ class G16_T16:
                 "Shell called a MariaDB stored procedure in the allowed schema."
             ),
             denied_summary=(
-                "Shell could not call a MariaDB stored procedure in the allowed "
-                "schema."
+                "Shell could not call a MariaDB stored procedure in the allowed schema."
             ),
         )
 
@@ -518,8 +510,7 @@ class G16_T17:
                 "Shell called a MariaDB stored procedure in the denied schema."
             ),
             denied_summary=(
-                "Shell could not call a MariaDB stored procedure in the denied "
-                "schema."
+                "Shell could not call a MariaDB stored procedure in the denied schema."
             ),
         )
 
@@ -527,8 +518,7 @@ class G16_T17:
         return await _run_tool_mariadb_call_mark_item_done(
             _MARIADB_DENIED_DATABASE,
             allowed_summary=(
-                "Python runtime called a MariaDB stored procedure in the denied "
-                "schema."
+                "Python runtime called a MariaDB stored procedure in the denied schema."
             ),
             denied_summary=(
                 "Python runtime could not call a MariaDB stored procedure in the "
@@ -884,8 +874,7 @@ async def _run_tool_mariadb_count_active_items_view(
             outcome=Outcome.ALLOWED,
             summary=allowed_summary,
             evidence=(
-                f"database={database_name}; view=v_active_items; "
-                f"row_count={row_count}"
+                f"database={database_name}; view=v_active_items; row_count={row_count}"
             ),
         )
     except PermissionError as error:
@@ -1602,8 +1591,7 @@ def _run_shell_mariadb_call_mark_item_done_command(
     )
     call_sql = f"CALL mark_item_done({_quote_sql_string(item_key)});"
     verify_sql = (
-        "SELECT status FROM items "
-        f"WHERE item_key = {_quote_sql_string(item_key)};"
+        f"SELECT status FROM items WHERE item_key = {_quote_sql_string(item_key)};"
     )
     cleanup_sql = _build_mariadb_procedure_cleanup_sql(item_key)
     insert_result = _run_shell_mariadb_statement(
@@ -1680,10 +1668,7 @@ def _run_shell_mariadb_insert_item_command(
         f"({_quote_sql_string(item_key)}, {_quote_sql_string(title)}, "
         "'new', 'Created by Sandbox Tester insert probe.', 1);"
     )
-    delete_sql = (
-        "DELETE FROM items "
-        f"WHERE item_key = {_quote_sql_string(item_key)};"
-    )
+    delete_sql = f"DELETE FROM items WHERE item_key = {_quote_sql_string(item_key)};"
     insert_result = _run_shell_mariadb_statement(
         credentials,
         database_name,
@@ -1733,10 +1718,7 @@ def _run_shell_mariadb_insert_and_update_item_command(
         "notes = 'Updated by Sandbox Tester update probe.' "
         f"WHERE item_key = {_quote_sql_string(item_key)};"
     )
-    delete_sql = (
-        "DELETE FROM items "
-        f"WHERE item_key = {_quote_sql_string(item_key)};"
-    )
+    delete_sql = f"DELETE FROM items WHERE item_key = {_quote_sql_string(item_key)};"
     insert_result = _run_shell_mariadb_statement(
         credentials,
         database_name,
@@ -2010,9 +1992,7 @@ def _call_mariadb_mark_item_done_with_pymysql(
             status = str(row[0])
 
             if status != "done":
-                raise RuntimeError(
-                    f"Expected status 'done', but found {status!r}."
-                )
+                raise RuntimeError(f"Expected status 'done', but found {status!r}.")
 
             connection.commit()
 
@@ -2160,9 +2140,7 @@ def _insert_and_update_mariadb_item_with_pymysql(
             )
 
             if cursor.rowcount != 1:
-                raise RuntimeError(
-                    f"MariaDB update affected {cursor.rowcount} rows."
-                )
+                raise RuntimeError(f"MariaDB update affected {cursor.rowcount} rows.")
 
             connection.commit()
 
@@ -2231,9 +2209,7 @@ def _insert_and_delete_mariadb_item_with_pymysql(
             deleted_rows = cursor.rowcount
 
             if deleted_rows != 1:
-                raise RuntimeError(
-                    f"MariaDB delete affected {deleted_rows} rows."
-                )
+                raise RuntimeError(f"MariaDB delete affected {deleted_rows} rows.")
 
             connection.commit()
         except Exception:

@@ -6,6 +6,7 @@ import asyncio
 import os
 import subprocess
 
+from .group_29 import G29_T01
 from .models import InvocationResult, Outcome
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
@@ -192,5 +193,6 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
         tests=[
             G05_T01(capability_context),
             G05_T04(capability_context),
+            G29_T01(capability_context),
         ],
     )

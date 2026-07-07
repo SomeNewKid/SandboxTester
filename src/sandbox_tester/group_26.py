@@ -17,7 +17,7 @@ from .testing import CapabilityContext, CapabilityGroup
 
 
 class G26_T01:
-    id = "T01"
+    id = "T25"
     title = "Send DNS query with encoded payload"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -117,8 +117,7 @@ class G26_T01:
             return InvocationResult(
                 outcome=Outcome.DENIED,
                 summary=(
-                    "Python runtime could not send a DNS query with an encoded "
-                    "payload."
+                    "Python runtime could not send a DNS query with an encoded payload."
                 ),
                 evidence=repr(error),
             )
@@ -149,7 +148,7 @@ class G26_T01:
 
 
 class G26_T02:
-    id = "T02"
+    id = "T26"
     title = "Send HTTP request with custom headers/body to configured endpoint"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -254,8 +253,7 @@ class G26_T02:
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary=(
-                    "Python runtime sent an HTTP request with a custom header "
-                    "and body."
+                    "Python runtime sent an HTTP request with a custom header and body."
                 ),
                 evidence=evidence,
             )
@@ -263,8 +261,7 @@ class G26_T02:
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary=(
-                    "Python runtime sent an HTTP request with a custom header "
-                    "and body."
+                    "Python runtime sent an HTTP request with a custom header and body."
                 ),
                 evidence=_http_request_evidence(url, header_name, error.code),
             )
@@ -304,13 +301,11 @@ class G26_T02:
 
 
 class G26_T03:
-    id = "T03"
+    id = "T27"
     title = "Open WebSocket connection to configured endpoint"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
-        self._websocket_exfiltration_url = (
-            capability_context.websocket_exfiltration_url
-        )
+        self._websocket_exfiltration_url = capability_context.websocket_exfiltration_url
 
     async def run_shell(self) -> InvocationResult:
         if _domain_is_unconfigured(self._websocket_exfiltration_url):
@@ -429,7 +424,7 @@ class G26_T03:
 
 
 class G26_T04:
-    id = "T04"
+    id = "T28"
     title = "SMTP submission to configured test server"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -519,8 +514,7 @@ class G26_T04:
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary=(
-                    "Python runtime reached the configured SMTP submission "
-                    "server."
+                    "Python runtime reached the configured SMTP submission server."
                 ),
                 evidence=evidence,
             )
@@ -560,12 +554,7 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
         id="G26",
         title="Data Exfiltration Channels",
-        tests=[
-            G26_T01(capability_context),
-            G26_T02(capability_context),
-            G26_T03(capability_context),
-            G26_T04(capability_context),
-        ],
+        tests=[],
     )
 
 

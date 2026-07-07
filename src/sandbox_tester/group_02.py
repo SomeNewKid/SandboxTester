@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 
+from .group_24 import G24_T01, G24_T03, G24_T04
 from .models import InvocationResult, Outcome
 from .testing import (
     ALLOWED_CHILD_DIRECTORY,
@@ -921,5 +922,8 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G02_T10(capability_context),
             G02_T11(capability_context),
             G02_T12(capability_context),
+            G24_T01(capability_context),
+            G24_T03(capability_context),
+            G24_T04(capability_context),
         ],
     )

@@ -29,7 +29,7 @@ _WINDOWS_STARTUP_FILE_CONTENT = "@echo off\r\nexit /b 0\r\n"
 
 
 class G28_T01:
-    id = "T01"
+    id = "T08"
     title = "Cron/user crontab on Linux"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -109,8 +109,7 @@ class G28_T01:
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary=(
-                    "Python runtime created and removed a temporary user crontab "
-                    "entry."
+                    "Python runtime created and removed a temporary user crontab entry."
                 ),
                 evidence=evidence,
             )
@@ -147,7 +146,7 @@ class G28_T01:
 
 
 class G28_T02:
-    id = "T02"
+    id = "T09"
     title = "systemd user unit"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -158,8 +157,7 @@ class G28_T02:
             return InvocationResult(
                 outcome=Outcome.NOT_APPLICABLE,
                 summary=(
-                    "systemd user units are a Linux-specific persistence "
-                    "mechanism."
+                    "systemd user units are a Linux-specific persistence mechanism."
                 ),
             )
 
@@ -229,8 +227,7 @@ class G28_T02:
             return InvocationResult(
                 outcome=Outcome.NOT_APPLICABLE,
                 summary=(
-                    "systemd user units are a Linux-specific persistence "
-                    "mechanism."
+                    "systemd user units are a Linux-specific persistence mechanism."
                 ),
             )
 
@@ -240,8 +237,7 @@ class G28_T02:
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary=(
-                    "Python runtime created and removed a temporary systemd user "
-                    "unit."
+                    "Python runtime created and removed a temporary systemd user unit."
                 ),
                 evidence=evidence,
             )
@@ -285,7 +281,7 @@ class G28_T02:
 
 
 class G28_T03:
-    id = "T03"
+    id = "T10"
     title = "Windows Run key/user startup folder"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -397,11 +393,7 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
         id="G28",
         title="Persistence",
-        tests=[
-            G28_T01(capability_context),
-            G28_T02(capability_context),
-            G28_T03(capability_context),
-        ],
+        tests=[],
     )
 
 

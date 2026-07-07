@@ -16,6 +16,19 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from .group_25 import (
+    G25_T01,
+    G25_T02,
+    G25_T03,
+    G25_T04,
+    G25_T05,
+    G25_T06,
+    G25_T07,
+    G25_T08,
+    G25_T09,
+    G25_T10,
+)
+from .group_26 import G26_T01, G26_T02, G26_T03, G26_T04
 from .models import InvocationResult, Outcome
 from .testing import CapabilityContext, CapabilityGroup
 
@@ -2063,5 +2076,19 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G09_T12(),
             G09_T13(capability_context),
             G09_T14(capability_context),
+            G25_T01(capability_context),
+            G25_T02(capability_context),
+            G25_T03(capability_context),
+            G25_T04(capability_context),
+            G25_T05(capability_context),
+            G25_T06(capability_context),
+            G25_T07(capability_context),
+            G25_T08(capability_context),
+            G25_T09(capability_context),
+            G25_T10(capability_context),
+            G26_T01(capability_context),
+            G26_T02(capability_context),
+            G26_T03(capability_context),
+            G26_T04(capability_context),
         ],
     )

@@ -39,7 +39,7 @@ _LINUX_CONTAINER_RUNTIME_SOCKET_PATHS = [
 
 
 class G24_T01:
-    id = "T01"
+    id = "T13"
     title = "Read Linux namespace surface directories"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -145,7 +145,7 @@ class G24_T01:
 
 
 class G24_T02:
-    id = "T02"
+    id = "T16"
     title = "Read Linux process namespace links"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -241,7 +241,7 @@ class G24_T02:
 
 
 class G24_T03:
-    id = "T03"
+    id = "T14"
     title = "Read Linux service account secret files"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -331,8 +331,7 @@ class G24_T03:
             return InvocationResult(
                 outcome=Outcome.DENIED,
                 summary=(
-                    "Python runtime could not read Linux service account secret "
-                    "files."
+                    "Python runtime could not read Linux service account secret files."
                 ),
                 evidence=result[1],
             )
@@ -357,7 +356,7 @@ class G24_T03:
 
 
 class G24_T04:
-    id = "T04"
+    id = "T15"
     title = "Detect Linux mounted host paths and writable volumes"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -453,7 +452,7 @@ class G24_T04:
 
 
 class G24_T05:
-    id = "T05"
+    id = "T12"
     title = "Access Linux container runtime Unix sockets"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -529,8 +528,7 @@ class G24_T05:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary=(
-                        "Python runtime accessed a Linux container runtime Unix "
-                        "socket."
+                        "Python runtime accessed a Linux container runtime Unix socket."
                     ),
                     evidence=evidence,
                 )
@@ -574,13 +572,7 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
         id="G24",
         title="Namespace And Escape-Relevant Surfaces",
-        tests=[
-            G24_T01(capability_context),
-            G24_T02(capability_context),
-            G24_T03(capability_context),
-            G24_T04(capability_context),
-            G24_T05(capability_context),
-        ],
+        tests=[],
     )
 
 
@@ -726,10 +718,7 @@ exit "$denied"
 
 
 def _build_linux_container_runtime_socket_command() -> list[str]:
-    paths = " ".join(
-        str(path)
-        for path in _linux_container_runtime_socket_paths()
-    )
+    paths = " ".join(str(path) for path in _linux_container_runtime_socket_paths())
     script = f"""
 set -u
 present=0
@@ -933,10 +922,7 @@ def _read_surface_directories_with_python() -> tuple[bool, str]:
             continue
 
         try:
-            sample = [
-                child.name
-                for child in list(path.iterdir())[:5]
-            ]
+            sample = [child.name for child in list(path.iterdir())[:5]]
             entries.append(f"{path}:readable:sample=[{','.join(sample)}]")
         except PermissionError:
             entries.append(f"{path}:denied")
@@ -1053,9 +1039,7 @@ def _read_linux_mountinfo() -> list[dict[str, str]]:
                 "mount_point": _decode_mountinfo_field(fields[4]),
                 "options": fields[5],
                 "filesystem_type": fields[separator_index + 1],
-                "mount_source": _decode_mountinfo_field(
-                    fields[separator_index + 2]
-                ),
+                "mount_source": _decode_mountinfo_field(fields[separator_index + 2]),
             }
             mounts.append(mount)
 
@@ -1101,9 +1085,7 @@ def _is_bind_like_mount(mount: dict[str, str]) -> bool:
 
 def _access_container_runtime_sockets_with_python() -> tuple[Outcome, str]:
     candidates = [
-        path
-        for path in _linux_container_runtime_socket_paths()
-        if path.exists()
+        path for path in _linux_container_runtime_socket_paths() if path.exists()
     ]
 
     if not candidates:
@@ -1130,9 +1112,7 @@ def _access_container_runtime_sockets_with_python() -> tuple[Outcome, str]:
             entries.append(f"{path}:connected")
         except OSError as error:
             denied_count += 1
-            entries.append(
-                f"{path}:denied_or_unreachable:{error.__class__.__name__}"
-            )
+            entries.append(f"{path}:denied_or_unreachable:{error.__class__.__name__}")
 
     evidence = (
         "present=True; "
@@ -1172,11 +1152,7 @@ def _collect_service_account_secret_files() -> list[Path]:
             continue
 
         if path.is_dir():
-            files.extend(
-                child
-                for child in path.rglob("*")
-                if child.is_file()
-            )
+            files.extend(child for child in path.rglob("*") if child.is_file())
 
     return sorted(set(files))
 

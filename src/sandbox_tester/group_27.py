@@ -20,7 +20,7 @@ _RUNTIME_MODULE_SENTINEL = "sandbox-tester-runtime-import"
 
 
 class G27_T01:
-    id = "T01"
+    id = "T12"
     title = "Load system native library"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -110,7 +110,7 @@ class G27_T01:
 
 
 class G27_T02:
-    id = "T02"
+    id = "T13"
     title = "Create and import Python module in allowed directory"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -217,7 +217,7 @@ class G27_T02:
 
 
 class G27_T03:
-    id = "T03"
+    id = "T14"
     title = "Call OS API with ctypes"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -307,7 +307,7 @@ class G27_T03:
 
 
 class G27_T04:
-    id = "T04"
+    id = "T15"
     title = "Spawn PowerShell with constrained-language detection"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
@@ -413,12 +413,7 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
         id="G27",
         title="Code Loading And Execution",
-        tests=[
-            G27_T01(capability_context),
-            G27_T02(capability_context),
-            G27_T03(capability_context),
-            G27_T04(capability_context),
-        ],
+        tests=[],
     )
 
 

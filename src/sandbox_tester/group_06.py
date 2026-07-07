@@ -9,6 +9,7 @@ import sys
 import uuid
 from pathlib import Path
 
+from .group_27 import G27_T01, G27_T02, G27_T03, G27_T04
 from .models import InvocationResult, Outcome
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
@@ -1041,5 +1042,9 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G06_T07(),
             G06_T09(capability_context),
             G06_T11(capability_context),
+            G27_T01(capability_context),
+            G27_T02(capability_context),
+            G27_T03(capability_context),
+            G27_T04(capability_context),
         ],
     )

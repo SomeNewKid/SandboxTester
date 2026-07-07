@@ -15,6 +15,7 @@ import urllib.request
 from ctypes import wintypes
 from pathlib import Path
 
+from .group_24 import G24_T05
 from .models import InvocationResult, Outcome
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
@@ -1657,5 +1658,6 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G10_T09(capability_context),
             G10_T10(capability_context),
             G10_T11(capability_context),
+            G24_T05(capability_context),
         ],
     )

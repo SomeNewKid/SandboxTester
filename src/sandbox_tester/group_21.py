@@ -10,6 +10,7 @@ import time
 import uuid
 from pathlib import Path
 
+from .group_28 import G28_T01, G28_T02, G28_T03
 from .models import InvocationResult, Outcome
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
@@ -321,6 +322,9 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G21_T01(capability_context),
             G21_T05(capability_context),
             G21_T07(capability_context),
+            G28_T01(capability_context),
+            G28_T02(capability_context),
+            G28_T03(capability_context),
         ],
     )
 
