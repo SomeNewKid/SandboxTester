@@ -33,7 +33,8 @@ class ConsoleReporter:
 
 class QuietReporter:
     def group_started(self, group_id: str, group_title: str) -> None:
-        pass
+        # the suite is too long running to not print anything.
+        print(f"{group_id} {group_title}")
 
     def capability_started(self, capability_id: str, capability_title: str) -> None:
         pass

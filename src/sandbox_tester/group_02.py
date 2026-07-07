@@ -7,9 +7,11 @@ import subprocess
 
 from .models import InvocationResult, Outcome
 from .testing import (
-    CHILD_DIRECTORY_NAME,
+    ALLOWED_CHILD_DIRECTORY,
+    ALLOWED_FILE_NAME,
+    DENIED_CHILD_DIRECTORY,
+    DENIED_FILE_NAME,
     HIDDEN_FILE_NAME,
-    TEXT_FILE_NAME,
     CapabilityContext,
     CapabilityGroup,
     OperatingSystem,
@@ -18,12 +20,14 @@ from .testing import (
 
 class G02_T01:
     id = "T01"
-    title = "Read a known allowed test file"
+    title = "Read a known file in allowed directory"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
         self._text_file = (
-            capability_context.scratch_directory / CHILD_DIRECTORY_NAME / TEXT_FILE_NAME
+            capability_context.allowed_directory
+            / ALLOWED_CHILD_DIRECTORY
+            / ALLOWED_FILE_NAME
         )
 
     async def run_shell(self) -> InvocationResult:
@@ -216,12 +220,14 @@ class G02_T03:
 
 class G02_T04:
     id = "T04"
-    title = "Read file metadata"
+    title = "Read file metadata in allowed directory"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
         self._text_file = (
-            capability_context.scratch_directory / CHILD_DIRECTORY_NAME / TEXT_FILE_NAME
+            capability_context.allowed_directory
+            / ALLOWED_CHILD_DIRECTORY
+            / ALLOWED_FILE_NAME
         )
 
     async def run_shell(self) -> InvocationResult:
@@ -292,13 +298,13 @@ class G02_T04:
 
 class G02_T05:
     id = "T05"
-    title = "Read hidden/dot files"
+    title = "Read hidden/dot files in allowed directory"
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
         self._hidden_file = (
-            capability_context.scratch_directory
-            / CHILD_DIRECTORY_NAME
+            capability_context.allowed_directory
+            / ALLOWED_CHILD_DIRECTORY
             / HIDDEN_FILE_NAME
         )
 
@@ -658,6 +664,246 @@ class G02_T09:
         )
 
 
+class G02_T10:
+    id = "T10"
+    title = "Read a known file in denied directory"
+
+    def __init__(self, capability_context: CapabilityContext) -> None:
+        self._operating_system = capability_context.operating_system
+        self._text_file = (
+            capability_context.denied_directory
+            / DENIED_CHILD_DIRECTORY
+            / DENIED_FILE_NAME
+        )
+
+    async def run_shell(self) -> InvocationResult:
+        try:
+            completed = await asyncio.to_thread(self._run_shell_command)
+
+            if completed.returncode == 0:
+                return InvocationResult(
+                    outcome=Outcome.ALLOWED,
+                    summary="Shell read the known denied test file.",
+                    evidence=completed.stdout[:500],
+                )
+
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell command failed.",
+                evidence=completed.stderr[:500],
+            )
+
+        except PermissionError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell invocation was denied by filesystem permissions.",
+                evidence=repr(error),
+            )
+        except Exception as error:
+            return InvocationResult(
+                outcome=Outcome.ERROR,
+                summary="Shell invocation raised an exception",
+                evidence=repr(error),
+            )
+
+    async def run_tool(self) -> InvocationResult:
+        try:
+            content = self._text_file.read_text(encoding="utf-8")
+
+            return InvocationResult(
+                outcome=Outcome.ALLOWED,
+                summary="Python filesystem API read the known denied test file.",
+                evidence=content[:500],
+            )
+        except PermissionError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Tool invocation was denied by filesystem permissions.",
+                evidence=repr(error),
+            )
+        except Exception as error:
+            return InvocationResult(
+                outcome=Outcome.ERROR,
+                summary="Tool invocation raised an exception.",
+                evidence=repr(error),
+            )
+
+    def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
+        if self._operating_system == OperatingSystem.WINDOWS:
+            command = ["cmd", "/c", "type", str(self._text_file)]
+        else:
+            command = ["cat", str(self._text_file)]
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+
+class G02_T11:
+    id = "T11"
+    title = "Read file metadata in denied directory"
+
+    def __init__(self, capability_context: CapabilityContext) -> None:
+        self._operating_system = capability_context.operating_system
+        self._text_file = (
+            capability_context.denied_directory
+            / DENIED_CHILD_DIRECTORY
+            / DENIED_FILE_NAME
+        )
+
+    async def run_shell(self) -> InvocationResult:
+        try:
+            completed = await asyncio.to_thread(self._run_shell_command)
+
+            if completed.returncode == 0:
+                return InvocationResult(
+                    outcome=Outcome.ALLOWED,
+                    summary="Shell read metadata for the known denied test file.",
+                    evidence=completed.stdout[:500],
+                )
+
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell command failed.",
+                evidence=completed.stderr[:500],
+            )
+
+        except PermissionError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell invocation was denied by filesystem permissions.",
+                evidence=repr(error),
+            )
+        except Exception as error:
+            return InvocationResult(
+                outcome=Outcome.ERROR,
+                summary="Shell invocation raised an exception",
+                evidence=repr(error),
+            )
+
+    async def run_tool(self) -> InvocationResult:
+        try:
+            metadata = self._text_file.stat()
+            evidence = (
+                f"size={metadata.st_size}, "
+                f"created={metadata.st_ctime}, "
+                f"modified={metadata.st_mtime}, "
+                f"mode={metadata.st_mode}"
+            )
+
+            return InvocationResult(
+                outcome=Outcome.ALLOWED,
+                summary="Python filesystem API read metadata for the denied test file.",
+                evidence=evidence,
+            )
+        except PermissionError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Tool invocation was denied by filesystem permissions.",
+                evidence=repr(error),
+            )
+        except Exception as error:
+            return InvocationResult(
+                outcome=Outcome.ERROR,
+                summary="Tool invocation raised an exception.",
+                evidence=repr(error),
+            )
+
+    def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
+        if self._operating_system == OperatingSystem.WINDOWS:
+            command = ["cmd", "/c", "dir", str(self._text_file)]
+        else:
+            command = ["ls", "-l", str(self._text_file)]
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+
+class G02_T12:
+    id = "T12"
+    title = "Read hidden/dot files in denied directory"
+
+    def __init__(self, capability_context: CapabilityContext) -> None:
+        self._operating_system = capability_context.operating_system
+        self._hidden_file = (
+            capability_context.denied_directory
+            / DENIED_CHILD_DIRECTORY
+            / HIDDEN_FILE_NAME
+        )
+
+    async def run_shell(self) -> InvocationResult:
+        try:
+            completed = await asyncio.to_thread(self._run_shell_command)
+
+            if completed.returncode == 0:
+                return InvocationResult(
+                    outcome=Outcome.ALLOWED,
+                    summary="Shell read the hidden dot file in the denied directory.",
+                    evidence=completed.stdout[:500],
+                )
+
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell command failed.",
+                evidence=completed.stderr[:500],
+            )
+
+        except PermissionError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell invocation was denied by filesystem permissions.",
+                evidence=repr(error),
+            )
+        except Exception as error:
+            return InvocationResult(
+                outcome=Outcome.ERROR,
+                summary="Shell invocation raised an exception",
+                evidence=repr(error),
+            )
+
+    async def run_tool(self) -> InvocationResult:
+        try:
+            content = self._hidden_file.read_text(encoding="utf-8")
+
+            return InvocationResult(
+                outcome=Outcome.ALLOWED,
+                summary="Python filesystem API read the denied directory hidden file.",
+                evidence=content[:500],
+            )
+        except PermissionError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Tool invocation was denied by filesystem permissions.",
+                evidence=repr(error),
+            )
+        except Exception as error:
+            return InvocationResult(
+                outcome=Outcome.ERROR,
+                summary="Tool invocation raised an exception.",
+                evidence=repr(error),
+            )
+
+    def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
+        if self._operating_system == OperatingSystem.WINDOWS:
+            command = ["cmd", "/c", "type", str(self._hidden_file)]
+        else:
+            command = ["cat", str(self._hidden_file)]
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+
 def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
         id="G02",
@@ -672,5 +918,8 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G02_T07(capability_context),
             G02_T08(capability_context),
             G02_T09(capability_context),
+            G02_T10(capability_context),
+            G02_T11(capability_context),
+            G02_T12(capability_context),
         ],
     )
