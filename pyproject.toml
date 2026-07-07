@@ -6,6 +6,7 @@ dependencies = [
     "openai-agents",
     "paramiko",
     "pillow",
+    "pymysql",
 ]
 
 [project.optional-dependencies]

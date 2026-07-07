@@ -24,6 +24,7 @@ from sandbox_tester.utilities import render_markdown_report
 VERBOSE_LOGGING = False
 DELETE_SCRATCH_DIRECTORIES = True
 SAVE_REPORT_TO_JSON = True
+PRINT_MARKDOWN_REPORT = True
 MOUNTED_SHARED_DIRECTORY = Path("S:/")
 ALLOWED_DOMAIN = "example.com"
 DENIED_DOMAIN = "example.net"
@@ -31,11 +32,19 @@ ALLOWED_LOCAL_ADDRESS = None
 DENIED_LOCAL_ADDRESS = None
 ALLOWED_LOCALNET_ADDRESS = None
 DENIED_LOCALNET_ADDRESS = None
+ALLOWED_INTRANET_TARGET = None
+DENIED_INTRANET_TARGET = "192.168.86.28"
 ALLOWED_DATABASE_ADDRESS = None
 DENIED_DATABASE_ADDRESS = None
 CONTAINER_RUNTIME_SOCKET = None
 LOCAL_DEV_SERVER_URL = None
 LOCAL_MODEL_SERVER_URL = None
+METADATA_ENDPOINT_URL = None
+DNS_EXFILTRATION_DOMAIN = "c2FuZGJveC10ZXN0ZXI.example.com"
+HTTP_EXFILTRATION_DOMAIN = "example.com"
+HTTP_EXFILTRATION_HEADER = "exfiltration=example"
+WEBSOCKET_EXFILTRATION_URL = "wss://echo.websocket.org"
+SMTP_EXFILTRATION_URL = None
 SSH_AGENT_SOCKET = os.environ.get("SSH_AUTH_SOCK")
 BROWSER_DEBUGGING_URL = None
 BROWSER_EXECUTABLE = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
@@ -64,11 +73,19 @@ def main() -> int:
         denied_local_address=DENIED_LOCAL_ADDRESS,
         allowed_localnet_address=ALLOWED_LOCALNET_ADDRESS,
         denied_localnet_address=DENIED_LOCALNET_ADDRESS,
+        allowed_intranet_target=ALLOWED_INTRANET_TARGET,
+        denied_intranet_target=DENIED_INTRANET_TARGET,
         allowed_database_address=ALLOWED_DATABASE_ADDRESS,
         denied_database_address=DENIED_DATABASE_ADDRESS,
         container_runtime_socket=CONTAINER_RUNTIME_SOCKET,
         local_dev_server_url=LOCAL_DEV_SERVER_URL,
         local_model_server_url=LOCAL_MODEL_SERVER_URL,
+        metadata_endpoint_url=METADATA_ENDPOINT_URL,
+        dns_exfiltration_domain=DNS_EXFILTRATION_DOMAIN,
+        http_exfiltration_domain=HTTP_EXFILTRATION_DOMAIN,
+        http_exfiltration_header=HTTP_EXFILTRATION_HEADER,
+        websocket_exfiltration_url=WEBSOCKET_EXFILTRATION_URL,
+        smtp_exfiltration_url=SMTP_EXFILTRATION_URL,
         ssh_agent_socket=SSH_AGENT_SOCKET,
         browser_debugging_url=BROWSER_DEBUGGING_URL,
         browser_executable=BROWSER_EXECUTABLE,
@@ -87,11 +104,14 @@ def main() -> int:
         print(f"JSON report saved to: {report_path}")
 
     if results:
-        markdown = render_markdown_report(results)
-        print()
-        print("-" * 40)
-        print()
-        print(markdown)
+        if PRINT_MARKDOWN_REPORT:
+            markdown = render_markdown_report(results)
+            print()
+            print("-" * 40)
+            print()
+            print(markdown)
+        else:
+            print("Markdown report not printed.")
     else:
         print("No results.")
 
