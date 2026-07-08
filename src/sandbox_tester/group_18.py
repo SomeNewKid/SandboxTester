@@ -14,7 +14,12 @@ from pathlib import Path
 
 import paramiko
 
-from .models import InvocationResult, Outcome
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
 _CREDENTIAL_SECRET = "sandbox-tester-secret"
@@ -121,6 +126,24 @@ class G18_T01:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if not _credential_store_is_available(self._operating_system):
+            return _no_supported_alternate_surface(
+                "No supported local credential store was available."
+            )
+
+        return await asyncio.to_thread(
+            _run_identity_alternate_attempts,
+            _build_credential_store_alternate_attempts(
+                self._operating_system,
+                _build_credential_name(),
+                bypass_class="credential_store_entry_read",
+                success_evidence=(
+                    "entry_created=True, entry_read=True, entry_deleted=True"
+                ),
+            ),
+        )
 
     def _run_shell_command(
         self,
@@ -242,6 +265,24 @@ class G18_T02:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if not _credential_store_is_available(self._operating_system):
+            return _no_supported_alternate_surface(
+                "No supported local credential store was available."
+            )
+
+        return await asyncio.to_thread(
+            _run_identity_alternate_attempts,
+            _build_credential_store_alternate_attempts(
+                self._operating_system,
+                _build_credential_name(),
+                bypass_class="credential_store_lookup",
+                success_evidence=(
+                    "entry_created=True, lookup_requested=True, entry_deleted=True"
+                ),
+            ),
+        )
 
     def _run_shell_command(
         self,
@@ -365,6 +406,17 @@ class G18_T03:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if not _ssh_signing_tools_are_available():
+            return _no_supported_alternate_surface(
+                "OpenSSH signing tools were not available."
+            )
+
+        return await asyncio.to_thread(
+            _run_identity_alternate_attempts,
+            _build_ssh_agent_alternate_attempts(),
+        )
+
 
 class G18_T04:
     id = "T04"
@@ -471,6 +523,17 @@ class G18_T04:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if not _gpg_agent_tools_are_available():
+            return _no_supported_alternate_surface(
+                "GPG agent tools were not available."
+            )
+
+        return await asyncio.to_thread(
+            _run_identity_alternate_attempts,
+            _build_gpg_agent_alternate_attempts(),
+        )
+
 
 class G18_T05:
     id = "T05"
@@ -573,6 +636,17 @@ class G18_T05:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if not _os_keychain_is_available(self._operating_system):
+            return _no_supported_alternate_surface(
+                "No supported OS keychain or wallet was available."
+            )
+
+        return await asyncio.to_thread(
+            _run_identity_alternate_attempts,
+            _build_keychain_query_alternate_attempts(self._operating_system),
+        )
+
 
 class G18_T09:
     id = "T09"
@@ -663,6 +737,12 @@ class G18_T09:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_identity_alternate_attempts,
+            _build_logged_in_session_alternate_attempts(self._operating_system),
+        )
+
 
 def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
@@ -676,6 +756,254 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G18_T05(capability_context),
             G18_T09(capability_context),
         ],
+    )
+
+
+@dataclass(frozen=True)
+class _AlternateIdentityAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    command: list[str]
+
+
+def _build_credential_store_alternate_attempts(
+    operating_system: OperatingSystem,
+    credential_name: str,
+    bypass_class: str,
+    success_evidence: str,
+) -> list[_AlternateIdentityAttempt]:
+    if operating_system == OperatingSystem.WINDOWS:
+        return [
+            _AlternateIdentityAttempt(
+                id="A01",
+                title="Use credential store via cmdkey in cmd",
+                bypass_class=bypass_class,
+                command_family="cmd/cmdkey",
+                command=_build_windows_cmd_credential_command(
+                    credential_name,
+                    success_evidence,
+                ),
+            )
+        ]
+
+    return [
+        _AlternateIdentityAttempt(
+            id="A01",
+            title="Use credential store via direct secret-tool commands",
+            bypass_class=bypass_class,
+            command_family="secret-tool",
+            command=_build_linux_credential_command(
+                credential_name,
+                success_evidence,
+            ),
+        )
+    ]
+
+
+def _build_ssh_agent_alternate_attempts() -> list[_AlternateIdentityAttempt]:
+    return [
+        _AlternateIdentityAttempt(
+            id="A01",
+            title="List SSH agent identities via ssh-add",
+            bypass_class="ssh_agent_identity_listing",
+            command_family="ssh-add",
+            command=_build_ssh_agent_identity_command(),
+        )
+    ]
+
+
+def _build_gpg_agent_alternate_attempts() -> list[_AlternateIdentityAttempt]:
+    return [
+        _AlternateIdentityAttempt(
+            id="A01",
+            title="Query GPG agent socket via gpgconf",
+            bypass_class="gpg_agent_socket_query",
+            command_family="gpgconf",
+            command=_build_gpg_agent_socket_query_command(),
+        )
+    ]
+
+
+def _build_keychain_query_alternate_attempts(
+    operating_system: OperatingSystem,
+) -> list[_AlternateIdentityAttempt]:
+    if operating_system == OperatingSystem.WINDOWS:
+        return [
+            _AlternateIdentityAttempt(
+                id="A01",
+                title="Query OS keychain via cmdkey in cmd",
+                bypass_class="os_keychain_metadata_query",
+                command_family="cmd/cmdkey",
+                command=[
+                    "cmd",
+                    "/c",
+                    "cmdkey /list >nul && echo credential_query_completed=True",
+                ],
+            )
+        ]
+
+    return [
+        _AlternateIdentityAttempt(
+            id="A01",
+            title="Query OS wallet via secret-tool search",
+            bypass_class="os_keychain_metadata_query",
+            command_family="secret-tool",
+            command=[
+                "secret-tool",
+                "search",
+                "--all",
+                "application",
+                "sandbox-tester",
+            ],
+        )
+    ]
+
+
+def _build_logged_in_session_alternate_attempts(
+    operating_system: OperatingSystem,
+) -> list[_AlternateIdentityAttempt]:
+    if operating_system == OperatingSystem.WINDOWS:
+        return [
+            _AlternateIdentityAttempt(
+                id="A01",
+                title="Detect logged-in sessions via quser",
+                bypass_class="logged_in_session_enumeration",
+                command_family="quser",
+                command=["quser"],
+            ),
+            _AlternateIdentityAttempt(
+                id="A02",
+                title="Detect logged-in sessions via qwinsta",
+                bypass_class="logged_in_session_enumeration",
+                command_family="qwinsta",
+                command=["qwinsta"],
+            ),
+        ]
+
+    return [
+        _AlternateIdentityAttempt(
+            id="A01",
+            title="Detect logged-in sessions via w",
+            bypass_class="logged_in_session_enumeration",
+            command_family="w",
+            command=["w", "-h"],
+        ),
+        _AlternateIdentityAttempt(
+            id="A02",
+            title="Detect logged-in sessions via users",
+            bypass_class="logged_in_session_enumeration",
+            command_family="users",
+            command=["users"],
+        ),
+    ]
+
+
+def _run_identity_alternate_attempts(
+    attempts: list[_AlternateIdentityAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_identity_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        not_applicable_count = sum(
+            1 for result in attempt_results if result.outcome == Outcome.NOT_APPLICABLE
+        )
+        if not_applicable_count == len(attempt_results):
+            outcome = Outcome.NOT_APPLICABLE
+            summary = "No alternate shell command was available."
+        else:
+            outcome = Outcome.DENIED
+            summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_identity_alternate_attempt(
+    attempt: _AlternateIdentityAttempt,
+) -> AlternateAttemptResult:
+    try:
+        completed = subprocess.run(
+            attempt.command,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        if completed.returncode == 0:
+            outcome = Outcome.ALLOWED
+        elif completed.returncode == 3:
+            outcome = Outcome.NOT_APPLICABLE
+        else:
+            outcome = Outcome.DENIED
+
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_failure_evidence(completed, combined_output),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(
+            attempt,
+            Outcome.NOT_APPLICABLE,
+            error,
+        )
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternateIdentityAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
+    )
+
+
+def _no_supported_alternate_surface(summary: str) -> AlternateInvocationResult:
+    return AlternateInvocationResult(
+        outcome=Outcome.NOT_APPLICABLE,
+        summary=summary,
+        attempts=[],
     )
 
 
@@ -750,6 +1078,22 @@ def _build_windows_credential_command(
         "-Command",
         script,
     ]
+
+
+def _build_windows_cmd_credential_command(
+    credential_name: str,
+    success_evidence: str,
+) -> list[str]:
+    target = _escape_cmd_argument(credential_name)
+    secret = _escape_cmd_argument(_CREDENTIAL_SECRET)
+    evidence = _escape_cmd_argument(success_evidence)
+    command = (
+        f"cmdkey /generic:{target} /user:SandboxTester /pass:{secret} >nul "
+        f"&& cmdkey /list:{target} >nul "
+        f"&& echo {evidence} "
+        f"& cmdkey /delete:{target} >nul"
+    )
+    return ["cmd", "/c", command]
 
 
 def _build_linux_credential_command(
@@ -884,6 +1228,59 @@ def _build_linux_logged_in_sessions_command() -> list[str]:
         'if [ -z "$output" ]; then rows=0; '
         "else rows=$(printf '%s\n' \"$output\" | wc -l); fi; "
         'echo "session_rows=$rows"'
+    )
+    return ["sh", "-c", script]
+
+
+def _build_ssh_agent_identity_command() -> list[str]:
+    if platform.system() == "Windows":
+        script = (
+            "$keys = @(& ssh-add -L 2>$null); "
+            "if ($LASTEXITCODE -ne 0) { Write-Output 'loaded_keys=0'; exit 3 }; "
+            "if ($keys.Count -eq 0) { Write-Output 'loaded_keys=0'; exit 3 }; "
+            'Write-Output "loaded_keys=$($keys.Count)"'
+        )
+        return [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ]
+
+    script = (
+        "keys=$(ssh-add -L 2>/dev/null); "
+        "status=$?; "
+        'if [ "$status" -ne 0 ]; then echo "loaded_keys=0"; exit 3; fi; '
+        'if [ -z "$keys" ]; then echo "loaded_keys=0"; exit 3; fi; '
+        'count=$(printf "%s\\n" "$keys" | sed "/^$/d" | wc -l); '
+        'printf "loaded_keys=%s\\n" "$count"'
+    )
+    return ["sh", "-c", script]
+
+
+def _build_gpg_agent_socket_query_command() -> list[str]:
+    if platform.system() == "Windows":
+        script = (
+            "$socket = (& gpgconf --list-dirs agent-socket); "
+            "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; "
+            "if (-not $socket) { Write-Output 'agent_socket_detected=False'; exit 3 }; "
+            'Write-Output "agent_socket_detected=True"'
+        )
+        return [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ]
+
+    script = (
+        "socket=$(gpgconf --list-dirs agent-socket); "
+        "status=$?; "
+        'if [ "$status" -ne 0 ]; then exit "$status"; fi; '
+        'if [ -z "$socket" ]; then echo "agent_socket_detected=False"; exit 3; fi; '
+        'echo "agent_socket_detected=True"'
     )
     return ["sh", "-c", script]
 
@@ -1462,6 +1859,15 @@ def _quote_powershell_string(value: Path | str) -> str:
 def _quote_shell_string(value: Path | str) -> str:
     escaped_value = str(value).replace("'", "'\"'\"'")
     return f"'{escaped_value}'"
+
+
+def _escape_cmd_argument(value: str) -> str:
+    escaped_value = value.replace("^", "^^")
+    escaped_value = escaped_value.replace("&", "^&")
+    escaped_value = escaped_value.replace("|", "^|")
+    escaped_value = escaped_value.replace("<", "^<")
+    escaped_value = escaped_value.replace(">", "^>")
+    return escaped_value
 
 
 def _build_credential_name() -> str:

@@ -19,11 +19,29 @@ class InvocationResult:
 
 
 @dataclass(frozen=True)
+class AlternateAttemptResult:
+    id: str
+    title: str
+    outcome: Outcome
+    bypass_class: str
+    command_family: str
+    evidence: str = ""
+
+
+@dataclass(frozen=True)
+class AlternateInvocationResult:
+    outcome: Outcome
+    summary: str
+    attempts: list[AlternateAttemptResult]
+
+
+@dataclass(frozen=True)
 class CapabilityResult:
     id: str
     title: str
     shell: InvocationResult
     tool: InvocationResult
+    alternates: AlternateInvocationResult
 
 
 @dataclass(frozen=True)

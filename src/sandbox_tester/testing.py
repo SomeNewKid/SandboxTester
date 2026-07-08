@@ -7,7 +7,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
-from .models import CapabilityGroupResult, CapabilityResult, InvocationResult
+from .models import (
+    AlternateInvocationResult,
+    CapabilityGroupResult,
+    CapabilityResult,
+    InvocationResult,
+    Outcome,
+)
 from .reporter import TestReporter
 
 ALLOWED_CHILD_DIRECTORY = "allowed"
@@ -220,6 +226,8 @@ class CapabilityTest(Protocol):
 
     async def run_tool(self) -> InvocationResult: ...
 
+    async def run_alternates(self) -> AlternateInvocationResult: ...
+
 
 @dataclass(frozen=True)
 class CapabilityGroup:
@@ -245,11 +253,15 @@ async def run_group(
         tool_result: InvocationResult = await test.run_tool()
         reporter.tool_completed(tool_result)
 
+        alternate_result: AlternateInvocationResult = await test.run_alternates()
+        reporter.alternates_completed(alternate_result)
+
         result = CapabilityResult(
             id=test.id,
             title=test.title,
             shell=shell_result,
             tool=tool_result,
+            alternates=alternate_result,
         )
         results.append(result)
 
@@ -260,3 +272,12 @@ async def run_group(
     )
 
     return group_result
+
+
+async def no_alternates() -> AlternateInvocationResult:
+    """Return a placeholder result for tests without alternate shell attempts."""
+    return AlternateInvocationResult(
+        outcome=Outcome.NOT_APPLICABLE,
+        summary="No alternate shell attempts are implemented for this capability.",
+        attempts=[],
+    )

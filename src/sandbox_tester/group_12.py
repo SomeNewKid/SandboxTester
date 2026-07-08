@@ -8,10 +8,16 @@ import os
 import shutil
 import subprocess
 from ctypes import wintypes
+from dataclasses import dataclass
 
 from PIL import ImageGrab, UnidentifiedImageError
 
-from .models import InvocationResult, Outcome
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
 
@@ -95,6 +101,24 @@ class G12_T01:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_ui_alternate_attempts,
+            [
+                _AlternateUiAttempt(
+                    id="A01",
+                    title="Capture screenshot via platform shell command",
+                    bypass_class="screen_capture",
+                    command_family="platform/screenshot",
+                    command=(
+                        _build_windows_screenshot_command()
+                        if os.name == "nt"
+                        else _build_linux_screenshot_command()
+                    ),
+                )
+            ],
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if os.name == "nt":
@@ -200,6 +224,24 @@ class G12_T07:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_ui_alternate_attempts,
+            [
+                _AlternateUiAttempt(
+                    id="A01",
+                    title="Open temporary window via platform shell command",
+                    bypass_class="application_window",
+                    command_family="platform/window",
+                    command=(
+                        _build_windows_application_window_command()
+                        if os.name == "nt"
+                        else _build_linux_application_window_command()
+                    ),
+                )
+            ],
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if os.name == "nt":
@@ -312,6 +354,24 @@ class G12_T08:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_ui_alternate_attempts,
+            [
+                _AlternateUiAttempt(
+                    id="A01",
+                    title="Read active window title via platform shell command",
+                    bypass_class="window_introspection",
+                    command_family="platform/window-title",
+                    command=(
+                        _build_windows_active_window_title_command()
+                        if self._operating_system == OperatingSystem.WINDOWS
+                        else _build_linux_active_window_title_command()
+                    ),
+                )
+            ],
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -476,6 +536,24 @@ class G12_T09:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_ui_alternate_attempts,
+            [
+                _AlternateUiAttempt(
+                    id="A01",
+                    title="Query accessibility channel via platform shell command",
+                    bypass_class="accessibility_channel",
+                    command_family="platform/accessibility",
+                    command=(
+                        _build_windows_accessibility_channel_command()
+                        if self._operating_system == OperatingSystem.WINDOWS
+                        else _build_linux_accessibility_channel_command()
+                    ),
+                )
+            ],
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = _build_windows_accessibility_channel_command()
@@ -509,6 +587,124 @@ class G12_T09:
 
 
 _NO_SHELL_CANDIDATE_EXIT_CODE = 127
+
+
+@dataclass(frozen=True)
+class _AlternateUiAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    command: list[str]
+
+
+def _run_ui_alternate_attempts(
+    attempts: list[_AlternateUiAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_ui_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        not_applicable_count = sum(
+            1 for result in attempt_results if result.outcome == Outcome.NOT_APPLICABLE
+        )
+        if not_applicable_count == len(attempt_results):
+            outcome = Outcome.NOT_APPLICABLE
+            summary = "No alternate shell command was available."
+        else:
+            outcome = Outcome.DENIED
+            summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_ui_alternate_attempt(
+    attempt: _AlternateUiAttempt,
+) -> AlternateAttemptResult:
+    try:
+        completed = subprocess.run(
+            attempt.command,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        if completed.returncode == 0:
+            outcome = Outcome.ALLOWED
+        elif completed.returncode == _NO_SHELL_CANDIDATE_EXIT_CODE:
+            outcome = Outcome.NOT_APPLICABLE
+        else:
+            outcome = Outcome.DENIED
+
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_alternate_evidence(completed, combined_output),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(
+            attempt,
+            Outcome.NOT_APPLICABLE,
+            error,
+        )
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternateUiAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
+    )
+
+
+def _alternate_evidence(
+    completed: subprocess.CompletedProcess[str],
+    combined_output: str,
+) -> str:
+    if combined_output:
+        return combined_output[:500]
+
+    return f"returncode={completed.returncode}"
 
 
 def _build_windows_screenshot_command() -> list[str]:

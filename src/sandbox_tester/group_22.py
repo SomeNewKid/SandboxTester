@@ -6,9 +6,16 @@ import asyncio
 import datetime as dt
 import subprocess
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
-from .models import InvocationResult, Outcome
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
 _NO_SHELL_CANDIDATE_EXIT_CODE = 127
@@ -22,6 +29,15 @@ _LINUX_SECURITY_LOG_CANDIDATES = [
     Path("/var/log/auth.log"),
     Path("/var/log/secure"),
 ]
+
+
+@dataclass(frozen=True)
+class _AlternateLogAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    operation: Callable[[], subprocess.CompletedProcess[str]]
 
 
 class G22_T01:
@@ -112,6 +128,18 @@ class G22_T01:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        log_file = self._allowed_directory / _APPLICATION_LOG_FILE_NAME
+        return await _run_single_log_alternate(
+            title="Write application log entry with alternate append command",
+            bypass_class="application_log_write",
+            command_family=_log_write_command_family(self._operating_system),
+            operation=lambda: _write_application_log_alternate(
+                self._operating_system,
+                log_file,
+            ),
+        )
 
 
 class G22_T03:
@@ -210,6 +238,14 @@ class G22_T03:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_log_alternate(
+            title="Read system logs with alternate log query",
+            bypass_class="system_log_read",
+            command_family=_system_log_command_family(self._operating_system),
+            operation=lambda: _read_system_logs_with_shell(self._operating_system),
+        )
+
 
 class G22_T04:
     id = "T04"
@@ -307,6 +343,14 @@ class G22_T04:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_log_alternate(
+            title="Read security logs with alternate log query",
+            bypass_class="security_log_read",
+            command_family=_security_log_command_family(self._operating_system),
+            operation=lambda: _read_security_logs_with_shell(self._operating_system),
+        )
+
 
 def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
@@ -318,6 +362,158 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G22_T04(capability_context),
         ],
     )
+
+
+async def _run_single_log_alternate(
+    title: str,
+    bypass_class: str,
+    command_family: str,
+    operation: Callable[[], subprocess.CompletedProcess[str]],
+) -> AlternateInvocationResult:
+    attempt = _AlternateLogAttempt(
+        id="A01",
+        title=title,
+        bypass_class=bypass_class,
+        command_family=command_family,
+        operation=operation,
+    )
+    return await asyncio.to_thread(_run_log_alternate_attempts, [attempt])
+
+
+def _run_log_alternate_attempts(
+    attempts: list[_AlternateLogAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_log_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        not_applicable_count = sum(
+            1 for result in attempt_results if result.outcome == Outcome.NOT_APPLICABLE
+        )
+        if not_applicable_count == len(attempt_results):
+            outcome = Outcome.NOT_APPLICABLE
+            summary = "No alternate shell command was available."
+        else:
+            outcome = Outcome.DENIED
+            summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_log_alternate_attempt(
+    attempt: _AlternateLogAttempt,
+) -> AlternateAttemptResult:
+    try:
+        completed = attempt.operation()
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        if completed.returncode == 0:
+            outcome = Outcome.ALLOWED
+        elif completed.returncode == _NO_SHELL_CANDIDATE_EXIT_CODE:
+            outcome = Outcome.NOT_APPLICABLE
+        else:
+            outcome = Outcome.DENIED
+
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_failure_evidence(completed, combined_output),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(
+            attempt,
+            Outcome.NOT_APPLICABLE,
+            error,
+        )
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternateLogAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
+    )
+
+
+def _write_application_log_alternate(
+    operating_system: OperatingSystem,
+    log_file: Path,
+) -> subprocess.CompletedProcess[str]:
+    completed = _write_application_log_entry_with_shell(operating_system, log_file)
+    if completed.returncode != 0:
+        return completed
+
+    if not log_file.exists():
+        return subprocess.CompletedProcess(
+            args=completed.args,
+            returncode=1,
+            stdout="",
+            stderr="Application log command succeeded, but log file was not found.",
+        )
+
+    return subprocess.CompletedProcess(
+        args=completed.args,
+        returncode=0,
+        stdout=f"path={log_file}; size={log_file.stat().st_size}",
+        stderr=completed.stderr,
+    )
+
+
+def _log_write_command_family(operating_system: OperatingSystem) -> str:
+    if operating_system == OperatingSystem.WINDOWS:
+        return "powershell/add-content"
+
+    return "sh/append-redirection"
+
+
+def _system_log_command_family(operating_system: OperatingSystem) -> str:
+    if operating_system == OperatingSystem.WINDOWS:
+        return "wevtutil/system"
+
+    return "journalctl/syslog"
+
+
+def _security_log_command_family(operating_system: OperatingSystem) -> str:
+    if operating_system == OperatingSystem.WINDOWS:
+        return "wevtutil/security"
+
+    return "auth-log/journalctl"
 
 
 def _write_application_log_entry_with_shell(

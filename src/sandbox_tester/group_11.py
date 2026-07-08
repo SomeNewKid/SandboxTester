@@ -14,11 +14,17 @@ import sys
 import tempfile
 import threading
 import urllib.request
+from dataclasses import dataclass
 from multiprocessing import shared_memory
 from pathlib import Path
 
-from .models import InvocationResult, Outcome
-from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
+from .testing import CapabilityContext, CapabilityGroup, OperatingSystem, no_alternates
 
 
 class G11_T01:
@@ -141,6 +147,12 @@ listener.close()
                 client.close()
             if listener is not None:
                 listener.close()
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_ipc_alternate_attempts,
+            _build_create_socket_alternate_attempts(),
+        )
 
     def _start_shell_listener(self) -> subprocess.Popen[str]:
         return subprocess.Popen(
@@ -343,6 +355,54 @@ class G11_T02:
             if listener is not None:
                 listener.close()
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        listener: socket.socket | None = None
+        accepted_connection: socket.socket | None = None
+        server_errors: list[BaseException] = []
+
+        try:
+            listener = self._start_listener()
+            port = listener.getsockname()[1]
+
+            def accept_connection() -> None:
+                nonlocal accepted_connection
+
+                try:
+                    accepted_connection, _address = listener.accept()
+                except BaseException as error:
+                    server_errors.append(error)
+
+            server_thread = threading.Thread(target=accept_connection)
+            server_thread.start()
+            result = await asyncio.to_thread(
+                _run_ipc_alternate_attempts,
+                _build_connect_socket_alternate_attempts(self._HOST, port),
+            )
+            server_thread.join(timeout=5)
+
+            if server_errors:
+                return AlternateInvocationResult(
+                    outcome=Outcome.ERROR,
+                    summary="Local IPC listener raised an exception.",
+                    attempts=[
+                        AlternateAttemptResult(
+                            id="A00",
+                            title="Local IPC listener setup",
+                            outcome=Outcome.ERROR,
+                            bypass_class="test_setup",
+                            command_family="python/socket",
+                            evidence=repr(server_errors[0]),
+                        )
+                    ],
+                )
+
+            return result
+        finally:
+            if accepted_connection is not None:
+                accepted_connection.close()
+            if listener is not None:
+                listener.close()
+
     def _start_listener(self) -> socket.socket:
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -481,6 +541,22 @@ class G11_T03:
                 outcome=Outcome.ERROR,
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
+            )
+        finally:
+            if shared_block is not None:
+                self._cleanup_shared_memory(shared_block)
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        shared_block: shared_memory.SharedMemory | None = None
+
+        try:
+            shared_block = self._create_shared_memory()
+            return await asyncio.to_thread(
+                _run_ipc_alternate_attempts,
+                _build_shared_memory_alternate_attempts(
+                    shared_block.name,
+                    len(self._EXPECTED_BYTES),
+                ),
             )
         finally:
             if shared_block is not None:
@@ -696,6 +772,22 @@ class G11_T04:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        script_path: Path | None = None
+
+        try:
+            script_path = self._create_shell_script()
+            return await asyncio.to_thread(
+                _run_ipc_alternate_attempts,
+                _build_message_queue_alternate_attempts(
+                    script_path,
+                    self._EXPECTED_MESSAGE,
+                ),
+            )
+        finally:
+            if script_path is not None:
+                self._delete_shell_script(script_path)
+
     def _create_shell_script(self) -> Path:
         script_content = f"""
 import multiprocessing
@@ -894,6 +986,12 @@ class G11_T05:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_ipc_alternate_attempts,
+            _build_clipboard_alternate_attempts(self._EXPECTED_TEXT),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if sys.platform == "win32":
             command = _build_windows_clipboard_command(self._EXPECTED_TEXT)
@@ -1013,6 +1111,12 @@ class G11_T06:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_ipc_alternate_attempts,
+            _build_desktop_channel_alternate_attempts(self._operating_system),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -1143,6 +1247,15 @@ class G11_T08:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_url_unconfigured():
+            return await no_alternates()
+
+        return await asyncio.to_thread(
+            _run_ipc_alternate_attempts,
+            _build_browser_debugging_alternate_attempts(self._get_url()),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         url = self._get_url()
         command = _build_shell_http_query_command(url)
@@ -1184,6 +1297,353 @@ class G11_T08:
 
 
 _NO_SHELL_CANDIDATE_EXIT_CODE = 127
+
+
+@dataclass(frozen=True)
+class _AlternateIpcAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    command: list[str]
+
+
+def _build_create_socket_alternate_attempts() -> list[_AlternateIpcAttempt]:
+    return [
+        _AlternateIpcAttempt(
+            id="A01",
+            title="Create local socket via Python subprocess",
+            bypass_class="ipc_socket_creation",
+            command_family="python/socket",
+            command=[
+                sys.executable,
+                "-c",
+                (
+                    "import socket; "
+                    "listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM); "
+                    "listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); "
+                    "listener.bind(('127.0.0.1', 0)); "
+                    "listener.listen(1); "
+                    "port = listener.getsockname()[1]; "
+                    "client = socket.create_connection(('127.0.0.1', port), "
+                    "timeout=5); "
+                    "connection, _address = listener.accept(); "
+                    "print(f'host=127.0.0.1; port={port}'); "
+                    "connection.close(); client.close(); listener.close()"
+                ),
+            ],
+        ),
+        _AlternateIpcAttempt(
+            id="A02",
+            title="Create local socket via shell TCP listener",
+            bypass_class="ipc_socket_creation",
+            command_family="shell/socket",
+            command=_build_local_socket_shell_command(),
+        ),
+    ]
+
+
+def _build_connect_socket_alternate_attempts(
+    host: str,
+    port: int,
+) -> list[_AlternateIpcAttempt]:
+    return [
+        _AlternateIpcAttempt(
+            id="A01",
+            title="Connect to IPC socket via Python subprocess",
+            bypass_class="ipc_socket_connection",
+            command_family="python/socket",
+            command=[
+                sys.executable,
+                "-c",
+                (
+                    "import socket; "
+                    f"connection = socket.create_connection(({host!r}, {port}), "
+                    "timeout=5); "
+                    "print(connection.getpeername()); "
+                    "connection.close()"
+                ),
+            ],
+        ),
+        _AlternateIpcAttempt(
+            id="A02",
+            title="Connect to IPC socket via shell TCP client",
+            bypass_class="ipc_socket_connection",
+            command_family="shell/tcp-client",
+            command=_build_tcp_connect_shell_command(host, port),
+        ),
+    ]
+
+
+def _build_shared_memory_alternate_attempts(
+    shared_memory_name: str,
+    size: int,
+) -> list[_AlternateIpcAttempt]:
+    return [
+        _AlternateIpcAttempt(
+            id="A01",
+            title="Read shared memory via Python subprocess",
+            bypass_class="shared_memory_access",
+            command_family="python/shared_memory",
+            command=[
+                sys.executable,
+                "-c",
+                (
+                    "from multiprocessing import shared_memory; "
+                    f"name = {shared_memory_name!r}; "
+                    f"size = {size}; "
+                    "block = shared_memory.SharedMemory(name=name); "
+                    "print(bytes(block.buf[:size]).decode('utf-8')); "
+                    "block.close()"
+                ),
+            ],
+        )
+    ]
+
+
+def _build_message_queue_alternate_attempts(
+    script_path: Path,
+    expected_message: str,
+) -> list[_AlternateIpcAttempt]:
+    return [
+        _AlternateIpcAttempt(
+            id="A01",
+            title="Use message queue via generated Python script",
+            bypass_class="message_queue_access",
+            command_family="python/multiprocessing",
+            command=[sys.executable, str(script_path)],
+        ),
+        _AlternateIpcAttempt(
+            id="A02",
+            title="Use message queue via current Python executable",
+            bypass_class="message_queue_access",
+            command_family="python/queue",
+            command=[
+                sys.executable,
+                "-c",
+                (
+                    "import queue; "
+                    f"message = {expected_message!r}; "
+                    "q = queue.Queue(); "
+                    "q.put(message); "
+                    "print(q.get(timeout=2))"
+                ),
+            ],
+        ),
+    ]
+
+
+def _build_clipboard_alternate_attempts(
+    expected_text: str,
+) -> list[_AlternateIpcAttempt]:
+    return [
+        _AlternateIpcAttempt(
+            id="A01",
+            title="Use clipboard via platform shell command",
+            bypass_class="clipboard_access",
+            command_family="platform/clipboard",
+            command=(
+                _build_windows_clipboard_command(expected_text)
+                if sys.platform == "win32"
+                else _build_linux_clipboard_command(expected_text)
+            ),
+        )
+    ]
+
+
+def _build_desktop_channel_alternate_attempts(
+    operating_system: OperatingSystem,
+) -> list[_AlternateIpcAttempt]:
+    return [
+        _AlternateIpcAttempt(
+            id="A01",
+            title="Query desktop automation channel via platform shell",
+            bypass_class="desktop_automation_channel",
+            command_family="platform/desktop-channel",
+            command=(
+                _build_windows_desktop_channel_command()
+                if operating_system == OperatingSystem.WINDOWS
+                else _build_linux_desktop_channel_command()
+            ),
+        )
+    ]
+
+
+def _build_browser_debugging_alternate_attempts(url: str) -> list[_AlternateIpcAttempt]:
+    return [
+        _AlternateIpcAttempt(
+            id="A01",
+            title="Query browser debugging endpoint via platform HTTP client",
+            bypass_class="browser_debugging_socket",
+            command_family="platform/http-client",
+            command=_build_shell_http_query_command(url),
+        )
+    ]
+
+
+def _build_local_socket_shell_command() -> list[str]:
+    if sys.platform == "win32":
+        script = (
+            "$listener = [Net.Sockets.TcpListener]::new("
+            "[Net.IPAddress]::Parse('127.0.0.1'), 0); "
+            "$listener.Start(); "
+            "$port = $listener.LocalEndpoint.Port; "
+            "$accept = $listener.AcceptTcpClientAsync(); "
+            "$client = [Net.Sockets.TcpClient]::new(); "
+            "$client.Connect('127.0.0.1', $port); "
+            "$serverClient = $accept.GetAwaiter().GetResult(); "
+            "$serverClient.Close(); $client.Close(); $listener.Stop(); "
+            'Write-Output "host=127.0.0.1; port=$port"'
+        )
+        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
+
+    port = 30000 + (os.getpid() % 20000)
+    script = (
+        "command -v nc >/dev/null 2>&1 || exit 127; "
+        f"nc -l 127.0.0.1 {port} >/dev/null & "
+        "pid=$!; sleep 1; "
+        f"nc -z -w 5 127.0.0.1 {port}; "
+        "status=$?; kill $pid 2>/dev/null; wait $pid 2>/dev/null; "
+        f"if [ \"$status\" -eq 0 ]; then echo 'host=127.0.0.1; port={port}'; fi; "
+        'exit "$status"'
+    )
+    return ["sh", "-c", script]
+
+
+def _build_tcp_connect_shell_command(host: str, port: int) -> list[str]:
+    if sys.platform == "win32":
+        script = (
+            "$client = [Net.Sockets.TcpClient]::new(); "
+            f"$client.Connect({_quote_powershell_string(host)}, {port}); "
+            "$endpoint = $client.Client.RemoteEndPoint.ToString(); "
+            "$client.Close(); "
+            'Write-Output "peer=$endpoint"'
+        )
+        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
+
+    return [
+        "sh",
+        "-c",
+        (
+            "if command -v nc >/dev/null 2>&1; then "
+            f"nc -z -w 5 {_quote_shell_string(host)} {port}; exit $?; "
+            "fi; "
+            "if command -v bash >/dev/null 2>&1; then "
+            f"timeout 5 bash -c {_quote_shell_string(f'</dev/tcp/{host}/{port}')} "
+            ">/dev/null 2>&1; exit $?; "
+            "fi; "
+            "exit 127"
+        ),
+    ]
+
+
+def _run_ipc_alternate_attempts(
+    attempts: list[_AlternateIpcAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_ipc_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        not_applicable_count = sum(
+            1 for result in attempt_results if result.outcome == Outcome.NOT_APPLICABLE
+        )
+        if not_applicable_count == len(attempt_results):
+            outcome = Outcome.NOT_APPLICABLE
+            summary = "No alternate shell command was available."
+        else:
+            outcome = Outcome.DENIED
+            summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_ipc_alternate_attempt(
+    attempt: _AlternateIpcAttempt,
+) -> AlternateAttemptResult:
+    try:
+        completed = subprocess.run(
+            attempt.command,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        if completed.returncode == 0:
+            outcome = Outcome.ALLOWED
+        elif completed.returncode == _NO_SHELL_CANDIDATE_EXIT_CODE:
+            outcome = Outcome.NOT_APPLICABLE
+        else:
+            outcome = Outcome.DENIED
+
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_alternate_evidence(completed, combined_output),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(
+            attempt,
+            Outcome.NOT_APPLICABLE,
+            error,
+        )
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternateIpcAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
+    )
+
+
+def _alternate_evidence(
+    completed: subprocess.CompletedProcess[str],
+    combined_output: str,
+) -> str:
+    if combined_output:
+        return combined_output[:500]
+
+    return f"returncode={completed.returncode}"
 
 
 def _build_windows_clipboard_command(expected_text: str) -> list[str]:

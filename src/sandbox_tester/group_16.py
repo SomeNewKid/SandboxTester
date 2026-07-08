@@ -8,11 +8,18 @@ import sqlite3
 import subprocess
 import sys
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import pymysql
 
-from .models import InvocationResult, Outcome
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
 from .testing import CapabilityContext, CapabilityGroup
 
 _DATABASE_FILE_NAME = "database.db"
@@ -52,6 +59,12 @@ class G16_T01:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_database_alternate_attempts,
+            _build_sqlite_alternate_attempts(self._database_directory),
+        )
+
 
 class G16_T02:
     id = "T02"
@@ -79,6 +92,12 @@ class G16_T02:
                 "Python runtime could not open a SQLite database in the denied "
                 "directory."
             ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_database_alternate_attempts,
+            _build_sqlite_alternate_attempts(self._database_directory),
         )
 
 
@@ -188,6 +207,22 @@ class G16_T05:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        credentials = _read_mariadb_credentials()
+        if credentials is None:
+            return _mariadb_credentials_not_configured_alternate_result()
+
+        return await asyncio.to_thread(
+            _run_database_alternate_attempts,
+            _build_mariadb_statement_alternate_attempts(
+                credentials,
+                None,
+                "SHOW DATABASES;",
+                "List schemas via MariaDB shell client",
+                "database_schema_listing",
+            ),
+        )
+
 
 class G16_T06:
     id = "T06"
@@ -214,6 +249,14 @@ class G16_T06:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_statement_alternates(
+            _MARIADB_ALLOWED_DATABASE,
+            "SELECT COUNT(*) FROM items;",
+            "Read table rows via MariaDB shell client",
+            "database_table_read",
+        )
+
 
 class G16_T07:
     id = "T07"
@@ -238,6 +281,14 @@ class G16_T07:
                 "Python runtime could not read MariaDB table rows from the "
                 "denied schema."
             ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_statement_alternates(
+            _MARIADB_DENIED_DATABASE,
+            "SELECT COUNT(*) FROM items;",
+            "Read table rows via MariaDB shell client",
+            "database_table_read",
         )
 
 
@@ -268,6 +319,9 @@ class G16_T08:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_insert_alternates(_MARIADB_ALLOWED_DATABASE)
+
 
 class G16_T09:
     id = "T09"
@@ -295,6 +349,9 @@ class G16_T09:
                 "denied schema."
             ),
         )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_insert_alternates(_MARIADB_DENIED_DATABASE)
 
 
 class G16_T10:
@@ -326,6 +383,9 @@ class G16_T10:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_insert_update_alternates(_MARIADB_ALLOWED_DATABASE)
+
 
 class G16_T11:
     id = "T11"
@@ -355,6 +415,9 @@ class G16_T11:
                 "in the denied schema."
             ),
         )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_insert_update_alternates(_MARIADB_DENIED_DATABASE)
 
 
 class G16_T12:
@@ -387,6 +450,9 @@ class G16_T12:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_insert_delete_alternates(_MARIADB_ALLOWED_DATABASE)
+
 
 class G16_T13:
     id = "T13"
@@ -417,6 +483,9 @@ class G16_T13:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_insert_delete_alternates(_MARIADB_DENIED_DATABASE)
+
 
 class G16_T14:
     id = "T14"
@@ -443,6 +512,14 @@ class G16_T14:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_statement_alternates(
+            _MARIADB_ALLOWED_DATABASE,
+            "SELECT COUNT(*) FROM v_active_items;",
+            "Read view rows via MariaDB shell client",
+            "database_view_read",
+        )
+
 
 class G16_T15:
     id = "T15"
@@ -467,6 +544,14 @@ class G16_T15:
                 "Python runtime could not read MariaDB view rows from the "
                 "denied schema."
             ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_statement_alternates(
+            _MARIADB_DENIED_DATABASE,
+            "SELECT COUNT(*) FROM v_active_items;",
+            "Read view rows via MariaDB shell client",
+            "database_view_read",
         )
 
 
@@ -498,6 +583,9 @@ class G16_T16:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_procedure_alternates(_MARIADB_ALLOWED_DATABASE)
+
 
 class G16_T17:
     id = "T17"
@@ -526,6 +614,9 @@ class G16_T17:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_mariadb_procedure_alternates(_MARIADB_DENIED_DATABASE)
+
 
 def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
@@ -548,6 +639,299 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G16_T16(),
             G16_T17(),
         ],
+    )
+
+
+@dataclass(frozen=True)
+class _AlternateDatabaseAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    operation: Callable[[], subprocess.CompletedProcess[str]]
+
+
+async def _run_mariadb_statement_alternates(
+    database_name: str,
+    sql: str,
+    title: str,
+    bypass_class: str,
+) -> AlternateInvocationResult:
+    credentials = _read_mariadb_credentials()
+    if credentials is None:
+        return _mariadb_credentials_not_configured_alternate_result()
+
+    return await asyncio.to_thread(
+        _run_database_alternate_attempts,
+        _build_mariadb_statement_alternate_attempts(
+            credentials,
+            database_name,
+            sql,
+            title,
+            bypass_class,
+        ),
+    )
+
+
+async def _run_mariadb_insert_alternates(
+    database_name: str,
+) -> AlternateInvocationResult:
+    credentials = _read_mariadb_credentials()
+    if credentials is None:
+        return _mariadb_credentials_not_configured_alternate_result()
+
+    item_key = _build_mariadb_item_key()
+    title = _build_mariadb_item_title(item_key)
+    return await asyncio.to_thread(
+        _run_database_alternate_attempts,
+        _build_mariadb_client_alternate_attempts(
+            lambda client: _run_shell_mariadb_insert_item_command_with_client(
+                client,
+                credentials,
+                database_name,
+                item_key,
+                title,
+            ),
+            "Insert row via MariaDB shell client",
+            "database_insert",
+        ),
+    )
+
+
+async def _run_mariadb_insert_update_alternates(
+    database_name: str,
+) -> AlternateInvocationResult:
+    credentials = _read_mariadb_credentials()
+    if credentials is None:
+        return _mariadb_credentials_not_configured_alternate_result()
+
+    item_key = _build_mariadb_item_key()
+    title = _build_mariadb_item_title(item_key)
+    updated_title = _build_mariadb_updated_item_title(item_key)
+    return await asyncio.to_thread(
+        _run_database_alternate_attempts,
+        _build_mariadb_client_alternate_attempts(
+            lambda client: (
+                _run_shell_mariadb_insert_and_update_item_command_with_client(
+                    client,
+                    credentials,
+                    database_name,
+                    item_key,
+                    title,
+                    updated_title,
+                )
+            ),
+            "Insert and update row via MariaDB shell client",
+            "database_update",
+        ),
+    )
+
+
+async def _run_mariadb_insert_delete_alternates(
+    database_name: str,
+) -> AlternateInvocationResult:
+    credentials = _read_mariadb_credentials()
+    if credentials is None:
+        return _mariadb_credentials_not_configured_alternate_result()
+
+    item_key = _build_mariadb_item_key()
+    title = _build_mariadb_item_title(item_key)
+    return await asyncio.to_thread(
+        _run_database_alternate_attempts,
+        _build_mariadb_client_alternate_attempts(
+            lambda client: (
+                _run_shell_mariadb_insert_and_delete_item_command_with_client(
+                    client,
+                    credentials,
+                    database_name,
+                    item_key,
+                    title,
+                )
+            ),
+            "Insert and delete row via MariaDB shell client",
+            "database_delete",
+        ),
+    )
+
+
+async def _run_mariadb_procedure_alternates(
+    database_name: str,
+) -> AlternateInvocationResult:
+    credentials = _read_mariadb_credentials()
+    if credentials is None:
+        return _mariadb_credentials_not_configured_alternate_result()
+
+    item_key = _build_mariadb_item_key()
+    title = _build_mariadb_item_title(item_key)
+    return await asyncio.to_thread(
+        _run_database_alternate_attempts,
+        _build_mariadb_client_alternate_attempts(
+            lambda client: _run_shell_mariadb_call_mark_item_done_command_with_client(
+                client,
+                credentials,
+                database_name,
+                item_key,
+                title,
+            ),
+            "Call stored procedure via MariaDB shell client",
+            "database_procedure_execute",
+        ),
+    )
+
+
+def _build_sqlite_alternate_attempts(
+    database_directory: Path,
+) -> list[_AlternateDatabaseAttempt]:
+    database_path = _build_database_path(database_directory)
+    return [
+        _AlternateDatabaseAttempt(
+            id="A01",
+            title="Open SQLite database via direct sqlite3 command",
+            bypass_class="sqlite_database_open",
+            command_family="sqlite3",
+            operation=lambda: _run_direct_sqlite_command(database_path),
+        )
+    ]
+
+
+def _build_mariadb_statement_alternate_attempts(
+    credentials: tuple[str, str],
+    database_name: str | None,
+    sql: str,
+    title: str,
+    bypass_class: str,
+) -> list[_AlternateDatabaseAttempt]:
+    return _build_mariadb_client_alternate_attempts(
+        lambda client: _run_shell_mariadb_statement_with_client(
+            client,
+            credentials,
+            database_name,
+            sql,
+        ),
+        title,
+        bypass_class,
+    )
+
+
+def _build_mariadb_client_alternate_attempts(
+    operation_builder: Callable[[str], subprocess.CompletedProcess[str]],
+    title: str,
+    bypass_class: str,
+) -> list[_AlternateDatabaseAttempt]:
+    return [
+        _AlternateDatabaseAttempt(
+            id="A01",
+            title=title,
+            bypass_class=bypass_class,
+            command_family="mariadb",
+            operation=lambda: operation_builder("mariadb"),
+        ),
+        _AlternateDatabaseAttempt(
+            id="A02",
+            title=title,
+            bypass_class=bypass_class,
+            command_family="mysql",
+            operation=lambda: operation_builder("mysql"),
+        ),
+    ]
+
+
+def _run_database_alternate_attempts(
+    attempts: list[_AlternateDatabaseAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_database_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        not_applicable_count = sum(
+            1 for result in attempt_results if result.outcome == Outcome.NOT_APPLICABLE
+        )
+        if not_applicable_count == len(attempt_results):
+            outcome = Outcome.NOT_APPLICABLE
+            summary = "No alternate shell command was available."
+        else:
+            outcome = Outcome.DENIED
+            summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_database_alternate_attempt(
+    attempt: _AlternateDatabaseAttempt,
+) -> AlternateAttemptResult:
+    try:
+        completed = attempt.operation()
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        if completed.returncode == 0:
+            outcome = Outcome.ALLOWED
+        elif completed.returncode == _NO_SHELL_CANDIDATE_EXIT_CODE:
+            outcome = Outcome.NOT_APPLICABLE
+        else:
+            outcome = Outcome.DENIED
+
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_failure_evidence(completed, combined_output),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(
+            attempt,
+            Outcome.NOT_APPLICABLE,
+            error,
+        )
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternateDatabaseAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
+    )
+
+
+def _mariadb_credentials_not_configured_alternate_result() -> AlternateInvocationResult:
+    return AlternateInvocationResult(
+        outcome=Outcome.NOT_APPLICABLE,
+        summary="MariaDB credentials were not configured.",
+        attempts=[],
     )
 
 
@@ -1410,6 +1794,31 @@ def _run_shell_sqlite_command(
     )
 
 
+def _run_direct_sqlite_command(
+    database_path: Path,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        command = ["sqlite3", str(database_path), _sqlite_probe_sql()]
+        return subprocess.run(
+            command,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(
+            args=["sqlite3"],
+            returncode=_NO_SHELL_CANDIDATE_EXIT_CODE,
+            stdout="",
+            stderr="sqlite3 was not found.",
+        )
+    finally:
+        database_path.unlink(missing_ok=True)
+
+
 def _create_and_query_database(database_path: Path) -> int:
     connection = sqlite3.connect(database_path)
     try:
@@ -1861,6 +2270,322 @@ def _run_shell_mariadb_statement(
         returncode=_NO_SHELL_CANDIDATE_EXIT_CODE,
         stdout="",
         stderr="No MariaDB shell client was found.",
+    )
+
+
+def _run_shell_mariadb_statement_with_client(
+    client: str,
+    credentials: tuple[str, str],
+    database_name: str | None,
+    sql: str,
+) -> subprocess.CompletedProcess[str]:
+    username, password = credentials
+    command = [
+        client,
+        "--host",
+        _MARIADB_HOST,
+        "--port",
+        str(_MARIADB_PORT),
+        "--user",
+        username,
+        "--batch",
+        "--skip-column-names",
+        "--execute",
+        sql,
+    ]
+
+    if database_name is not None:
+        command.insert(-4, "--database")
+        command.insert(-4, database_name)
+
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            env=_build_mariadb_shell_environment(password),
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(
+            args=[client],
+            returncode=_NO_SHELL_CANDIDATE_EXIT_CODE,
+            stdout="",
+            stderr=f"{client} shell client was not found.",
+        )
+
+
+def _run_shell_mariadb_insert_item_command_with_client(
+    client: str,
+    credentials: tuple[str, str],
+    database_name: str,
+    item_key: str,
+    title: str,
+) -> subprocess.CompletedProcess[str]:
+    insert_sql = (
+        "INSERT INTO items (item_key, title, status, notes, quantity) VALUES "
+        f"({_quote_sql_string(item_key)}, {_quote_sql_string(title)}, "
+        "'new', 'Created by Sandbox Tester alternate insert probe.', 1);"
+    )
+    delete_sql = f"DELETE FROM items WHERE item_key = {_quote_sql_string(item_key)};"
+    insert_result = _run_shell_mariadb_statement_with_client(
+        client,
+        credentials,
+        database_name,
+        insert_sql,
+    )
+
+    if insert_result.returncode != 0:
+        return insert_result
+
+    delete_result = _run_shell_mariadb_statement_with_client(
+        client,
+        credentials,
+        database_name,
+        delete_sql,
+    )
+    stdout = (
+        f"database={database_name}; table=items; item_key={item_key}; "
+        f"inserted=True; cleanup_succeeded={delete_result.returncode == 0}"
+    )
+
+    if delete_result.returncode != 0:
+        cleanup_error = delete_result.stderr.strip()
+        stdout = f"{stdout}; cleanup_error={cleanup_error[:200]}"
+
+    return subprocess.CompletedProcess(
+        args=insert_result.args,
+        returncode=0,
+        stdout=stdout,
+        stderr=insert_result.stderr,
+    )
+
+
+def _run_shell_mariadb_insert_and_update_item_command_with_client(
+    client: str,
+    credentials: tuple[str, str],
+    database_name: str,
+    item_key: str,
+    title: str,
+    updated_title: str,
+) -> subprocess.CompletedProcess[str]:
+    insert_sql = (
+        "INSERT INTO items (item_key, title, status, notes, quantity) VALUES "
+        f"({_quote_sql_string(item_key)}, {_quote_sql_string(title)}, "
+        "'new', 'Created by Sandbox Tester alternate update probe.', 1);"
+    )
+    update_sql = (
+        "UPDATE items "
+        f"SET title = {_quote_sql_string(updated_title)}, "
+        "notes = 'Updated by Sandbox Tester alternate update probe.' "
+        f"WHERE item_key = {_quote_sql_string(item_key)};"
+    )
+    delete_sql = f"DELETE FROM items WHERE item_key = {_quote_sql_string(item_key)};"
+    insert_result = _run_shell_mariadb_statement_with_client(
+        client,
+        credentials,
+        database_name,
+        insert_sql,
+    )
+
+    if insert_result.returncode != 0:
+        return insert_result
+
+    update_result = _run_shell_mariadb_statement_with_client(
+        client,
+        credentials,
+        database_name,
+        update_sql,
+    )
+
+    if update_result.returncode != 0:
+        _run_shell_mariadb_statement_with_client(
+            client,
+            credentials,
+            database_name,
+            delete_sql,
+        )
+        return update_result
+
+    delete_result = _run_shell_mariadb_statement_with_client(
+        client,
+        credentials,
+        database_name,
+        delete_sql,
+    )
+    stdout = (
+        f"database={database_name}; table=items; item_key={item_key}; "
+        f"inserted=True; updated=True; "
+        f"cleanup_succeeded={delete_result.returncode == 0}"
+    )
+
+    if delete_result.returncode != 0:
+        cleanup_error = delete_result.stderr.strip()
+        stdout = f"{stdout}; cleanup_error={cleanup_error[:200]}"
+
+    return subprocess.CompletedProcess(
+        args=insert_result.args,
+        returncode=0,
+        stdout=stdout,
+        stderr=insert_result.stderr,
+    )
+
+
+def _run_shell_mariadb_insert_and_delete_item_command_with_client(
+    client: str,
+    credentials: tuple[str, str],
+    database_name: str,
+    item_key: str,
+    title: str,
+) -> subprocess.CompletedProcess[str]:
+    insert_sql = (
+        "INSERT INTO items (item_key, title, status, notes, quantity) VALUES "
+        f"({_quote_sql_string(item_key)}, {_quote_sql_string(title)}, "
+        "'new', 'Created by Sandbox Tester alternate delete probe.', 1);"
+    )
+    delete_sql = (
+        "DELETE FROM items "
+        f"WHERE item_key = {_quote_sql_string(item_key)}; "
+        "SELECT ROW_COUNT();"
+    )
+    insert_result = _run_shell_mariadb_statement_with_client(
+        client,
+        credentials,
+        database_name,
+        insert_sql,
+    )
+
+    if insert_result.returncode != 0:
+        return insert_result
+
+    delete_result = _run_shell_mariadb_statement_with_client(
+        client,
+        credentials,
+        database_name,
+        delete_sql,
+    )
+
+    if delete_result.returncode != 0:
+        return delete_result
+
+    deleted_rows = delete_result.stdout.strip()
+    if deleted_rows != "1":
+        return subprocess.CompletedProcess(
+            args=delete_result.args,
+            returncode=1,
+            stdout="",
+            stderr=f"Expected to delete 1 row, but deleted {deleted_rows}.",
+        )
+
+    return subprocess.CompletedProcess(
+        args=insert_result.args,
+        returncode=0,
+        stdout=(
+            f"database={database_name}; table=items; item_key={item_key}; "
+            "inserted=True; deleted=True; deleted_rows=1"
+        ),
+        stderr=insert_result.stderr,
+    )
+
+
+def _run_shell_mariadb_call_mark_item_done_command_with_client(
+    client: str,
+    credentials: tuple[str, str],
+    database_name: str,
+    item_key: str,
+    title: str,
+) -> subprocess.CompletedProcess[str]:
+    insert_sql = (
+        "INSERT INTO items (item_key, title, status, notes, quantity) VALUES "
+        f"({_quote_sql_string(item_key)}, {_quote_sql_string(title)}, "
+        "'new', 'Created by Sandbox Tester alternate procedure probe.', 1);"
+    )
+    call_sql = f"CALL mark_item_done({_quote_sql_string(item_key)});"
+    verify_sql = (
+        f"SELECT status FROM items WHERE item_key = {_quote_sql_string(item_key)};"
+    )
+    cleanup_sql = _build_mariadb_procedure_cleanup_sql(item_key)
+    insert_result = _run_shell_mariadb_statement_with_client(
+        client,
+        credentials,
+        database_name,
+        insert_sql,
+    )
+
+    if insert_result.returncode != 0:
+        return insert_result
+
+    call_result = _run_shell_mariadb_statement_with_client(
+        client,
+        credentials,
+        database_name,
+        call_sql,
+    )
+
+    if call_result.returncode != 0:
+        _run_shell_mariadb_statement_with_client(
+            client,
+            credentials,
+            database_name,
+            cleanup_sql,
+        )
+        return call_result
+
+    verify_result = _run_shell_mariadb_statement_with_client(
+        client,
+        credentials,
+        database_name,
+        verify_sql,
+    )
+
+    if verify_result.returncode != 0:
+        _run_shell_mariadb_statement_with_client(
+            client,
+            credentials,
+            database_name,
+            cleanup_sql,
+        )
+        return verify_result
+
+    status = verify_result.stdout.strip()
+    if status != "done":
+        _run_shell_mariadb_statement_with_client(
+            client,
+            credentials,
+            database_name,
+            cleanup_sql,
+        )
+        return subprocess.CompletedProcess(
+            args=verify_result.args,
+            returncode=1,
+            stdout="",
+            stderr=f"Expected status 'done', but found {status!r}.",
+        )
+
+    cleanup_result = _run_shell_mariadb_statement_with_client(
+        client,
+        credentials,
+        database_name,
+        cleanup_sql,
+    )
+    stdout = (
+        f"database={database_name}; procedure=mark_item_done; "
+        f"item_key={item_key}; called=True; status={status}; "
+        f"cleanup_succeeded={cleanup_result.returncode == 0}"
+    )
+
+    if cleanup_result.returncode != 0:
+        cleanup_error = cleanup_result.stderr.strip()
+        stdout = f"{stdout}; cleanup_error={cleanup_error[:200]}"
+
+    return subprocess.CompletedProcess(
+        args=insert_result.args,
+        returncode=0,
+        stdout=stdout,
+        stderr=insert_result.stderr,
     )
 
 

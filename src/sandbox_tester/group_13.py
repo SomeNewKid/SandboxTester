@@ -18,11 +18,18 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .models import InvocationResult, Outcome
-from .testing import CapabilityContext, CapabilityGroup
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
+from .testing import CapabilityContext, CapabilityGroup, no_alternates
 
 
 class _QuietThreadingHTTPServer(http.server.ThreadingHTTPServer):
@@ -166,6 +173,30 @@ class G13_T01:
             )
         finally:
             shutil.rmtree(profile_directory, ignore_errors=True)
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_browser_unconfigured():
+            return await no_alternates()
+
+        def run_attempt() -> subprocess.CompletedProcess[str]:
+            profile_directory = self._create_profile_directory()
+            try:
+                return self._run_browser(profile_directory)
+            finally:
+                shutil.rmtree(profile_directory, ignore_errors=True)
+
+        return await asyncio.to_thread(
+            _run_browser_alternate_attempts,
+            [
+                _AlternateBrowserAttempt(
+                    id="A01",
+                    title="Launch fresh-profile browser via direct executable",
+                    bypass_class="browser_execution",
+                    command_family="browser/direct-executable",
+                    run=run_attempt,
+                )
+            ],
+        )
 
     def _run_shell_command(
         self,
@@ -364,6 +395,23 @@ class G13_T02:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_browser_unconfigured() or self._is_profile_unconfigured():
+            return await no_alternates()
+
+        return await asyncio.to_thread(
+            _run_browser_alternate_attempts,
+            [
+                _AlternateBrowserAttempt(
+                    id="A01",
+                    title="Launch existing-profile browser via direct executable",
+                    bypass_class="browser_profile_access",
+                    command_family="browser/direct-executable",
+                    run=self._run_browser,
+                )
+            ],
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         browser_path = self._get_browser_executable()
         user_data_directory, profile_name = self._get_chrome_profile_parts()
@@ -556,6 +604,23 @@ class G13_T03:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_profile_unconfigured():
+            return await no_alternates()
+
+        return await asyncio.to_thread(
+            _run_browser_alternate_attempts,
+            [
+                _AlternateBrowserAttempt(
+                    id="A01",
+                    title="Read bookmarks via platform JSON reader",
+                    bypass_class="browser_profile_file_read",
+                    command_family="platform/json-reader",
+                    run=self._run_shell_command,
+                )
+            ],
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         bookmarks_path = self._get_bookmarks_path()
         return _run_shell_bookmark_count_command(bookmarks_path)
@@ -672,6 +737,23 @@ class G13_T04:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_profile_unconfigured():
+            return await no_alternates()
+
+        return await asyncio.to_thread(
+            _run_browser_alternate_attempts,
+            [
+                _AlternateBrowserAttempt(
+                    id="A01",
+                    title="Read history via platform SQLite reader",
+                    bypass_class="browser_profile_database_read",
+                    command_family="platform/sqlite-reader",
+                    run=self._run_shell_command,
+                )
+            ],
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         database_path = self._get_history_path()
@@ -791,6 +873,23 @@ class G13_T05:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_profile_unconfigured():
+            return await no_alternates()
+
+        return await asyncio.to_thread(
+            _run_browser_alternate_attempts,
+            [
+                _AlternateBrowserAttempt(
+                    id="A01",
+                    title="Read cookies via platform SQLite reader",
+                    bypass_class="browser_profile_database_read",
+                    command_family="platform/sqlite-reader",
+                    run=self._run_shell_command,
+                )
+            ],
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         database_path = self._get_cookies_path()
         return _run_shell_sqlite_count_command(
@@ -909,6 +1008,23 @@ class G13_T06:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_profile_unconfigured():
+            return await no_alternates()
+
+        return await asyncio.to_thread(
+            _run_browser_alternate_attempts,
+            [
+                _AlternateBrowserAttempt(
+                    id="A01",
+                    title="Read session store via platform file enumeration",
+                    bypass_class="browser_profile_file_read",
+                    command_family="platform/file-enumeration",
+                    run=self._run_shell_command,
+                )
+            ],
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         profile_path = _get_existing_browser_profile(self._existing_browser_profile)
@@ -1039,6 +1155,23 @@ class G13_T07:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_browser_unconfigured():
+            return await no_alternates()
+
+        return await asyncio.to_thread(
+            _run_browser_alternate_attempts,
+            [
+                _AlternateBrowserAttempt(
+                    id="A01",
+                    title="Query browser automation protocol via shell HTTP client",
+                    bypass_class="browser_automation_protocol",
+                    command_family="browser/devtools-http",
+                    run=self._run_shell_command,
+                )
+            ],
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         browser_path = self._get_browser_executable()
@@ -1247,6 +1380,30 @@ class G13_T08:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_browser_unconfigured():
+            return await no_alternates()
+
+        def run_attempt() -> subprocess.CompletedProcess[str]:
+            script_path = self._create_shell_script()
+            try:
+                return self._run_shell_script(script_path)
+            finally:
+                script_path.unlink(missing_ok=True)
+
+        return await asyncio.to_thread(
+            _run_browser_alternate_attempts,
+            [
+                _AlternateBrowserAttempt(
+                    id="A01",
+                    title="Download file through browser via generated script",
+                    bypass_class="browser_file_download",
+                    command_family="python/browser-script",
+                    run=run_attempt,
+                )
+            ],
+        )
+
     def _create_shell_script(self) -> Path:
         browser_path = self._get_browser_executable()
         script_content = f"""
@@ -1435,6 +1592,30 @@ class G13_T09:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_browser_unconfigured():
+            return await no_alternates()
+
+        def run_attempt() -> subprocess.CompletedProcess[str]:
+            script_path = self._create_shell_script()
+            try:
+                return self._run_shell_script(script_path)
+            finally:
+                script_path.unlink(missing_ok=True)
+
+        return await asyncio.to_thread(
+            _run_browser_alternate_attempts,
+            [
+                _AlternateBrowserAttempt(
+                    id="A01",
+                    title="Upload file through browser via generated script",
+                    bypass_class="browser_file_upload",
+                    command_family="python/browser-script",
+                    run=run_attempt,
+                )
+            ],
+        )
+
     def _create_shell_script(self) -> Path:
         browser_path = self._get_browser_executable()
         script_content = f"""
@@ -1619,6 +1800,30 @@ class G13_T10:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_browser_unconfigured():
+            return await no_alternates()
+
+        def run_attempt() -> subprocess.CompletedProcess[str]:
+            script_path = self._create_shell_script()
+            try:
+                return self._run_shell_script(script_path)
+            finally:
+                script_path.unlink(missing_ok=True)
+
+        return await asyncio.to_thread(
+            _run_browser_alternate_attempts,
+            [
+                _AlternateBrowserAttempt(
+                    id="A01",
+                    title="Submit form through browser via generated script",
+                    bypass_class="browser_form_submission",
+                    command_family="python/browser-script",
+                    run=run_attempt,
+                )
+            ],
+        )
 
     def _create_shell_script(self) -> Path:
         browser_path = self._get_browser_executable()
@@ -1814,6 +2019,27 @@ class G13_T11:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if self._is_profile_unconfigured():
+            return await no_alternates()
+
+        database_path = self._get_login_data_path()
+        if not database_path.exists():
+            return await no_alternates()
+
+        return await asyncio.to_thread(
+            _run_browser_alternate_attempts,
+            [
+                _AlternateBrowserAttempt(
+                    id="A01",
+                    title="Read password manager metadata via platform SQLite reader",
+                    bypass_class="browser_password_store_read",
+                    command_family="platform/sqlite-reader",
+                    run=lambda: self._run_shell_command(database_path),
+                )
+            ],
+        )
 
     def _run_shell_command(
         self,
@@ -2798,6 +3024,116 @@ def _copy_database_to_allowed_directory(
 
 
 _NO_SHELL_CANDIDATE_EXIT_CODE = 127
+
+
+@dataclass(frozen=True)
+class _AlternateBrowserAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    run: Callable[[], subprocess.CompletedProcess[str]]
+
+
+def _run_browser_alternate_attempts(
+    attempts: list[_AlternateBrowserAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_browser_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        not_applicable_count = sum(
+            1 for result in attempt_results if result.outcome == Outcome.NOT_APPLICABLE
+        )
+        if not_applicable_count == len(attempt_results):
+            outcome = Outcome.NOT_APPLICABLE
+            summary = "No alternate shell command was available."
+        else:
+            outcome = Outcome.DENIED
+            summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_browser_alternate_attempt(
+    attempt: _AlternateBrowserAttempt,
+) -> AlternateAttemptResult:
+    try:
+        completed = attempt.run()
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        if completed.returncode == 0:
+            outcome = Outcome.ALLOWED
+        elif completed.returncode == _NO_SHELL_CANDIDATE_EXIT_CODE:
+            outcome = Outcome.NOT_APPLICABLE
+        else:
+            outcome = Outcome.DENIED
+
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_alternate_evidence(completed, combined_output),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(
+            attempt,
+            Outcome.NOT_APPLICABLE,
+            error,
+        )
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternateBrowserAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
+    )
+
+
+def _alternate_evidence(
+    completed: subprocess.CompletedProcess[str],
+    combined_output: str,
+) -> str:
+    if combined_output:
+        return combined_output[:500]
+
+    return f"returncode={completed.returncode}"
 
 
 def _shell_candidate_was_missing(

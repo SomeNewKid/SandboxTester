@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from .models import InvocationResult
+from .models import AlternateInvocationResult, InvocationResult
 
 
 class TestReporter(Protocol):
@@ -13,6 +13,8 @@ class TestReporter(Protocol):
     def shell_completed(self, result: InvocationResult) -> None: ...
 
     def tool_completed(self, result: InvocationResult) -> None: ...
+
+    def alternates_completed(self, result: AlternateInvocationResult) -> None: ...
 
 
 class ConsoleReporter:
@@ -30,6 +32,9 @@ class ConsoleReporter:
     def tool_completed(self, result: InvocationResult) -> None:
         print(f"  tool:  {result.outcome}")
 
+    def alternates_completed(self, result: AlternateInvocationResult) -> None:
+        print(f"  alt:   {result.outcome}")
+
 
 class QuietReporter:
     def group_started(self, group_id: str, group_title: str) -> None:
@@ -43,4 +48,7 @@ class QuietReporter:
         pass
 
     def tool_completed(self, result: InvocationResult) -> None:
+        pass
+
+    def alternates_completed(self, result: AlternateInvocationResult) -> None:
         pass

@@ -11,9 +11,15 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
-from .models import InvocationResult, Outcome
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
 from .testing import CapabilityContext, CapabilityGroup
 
 _TEST_PACKAGE_SPEC = "colorama==0.4.6"
@@ -119,6 +125,12 @@ class G14_T01:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_package_alternate_attempts,
+            _build_registry_query_alternate_attempts(),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         command = [
@@ -254,6 +266,16 @@ class G14_T02:
                 outcome=Outcome.ERROR,
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
+            )
+        finally:
+            shutil.rmtree(environment_directory, ignore_errors=True)
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        environment_directory = self._create_environment_directory("alternate-venv-")
+        try:
+            return await asyncio.to_thread(
+                _run_package_alternate_attempts,
+                _build_environment_install_alternate_attempts(environment_directory),
             )
         finally:
             shutil.rmtree(environment_directory, ignore_errors=True)
@@ -401,6 +423,23 @@ class G14_T03:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        candidate_paths = self._get_candidate_paths()
+        if not candidate_paths:
+            return AlternateInvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No global package install locations were found.",
+                attempts=[],
+            )
+
+        return await asyncio.to_thread(
+            _run_package_alternate_attempts,
+            _build_global_install_probe_alternate_attempts(
+                candidate_paths,
+                self._MARKER_FILE_NAME,
+            ),
+        )
 
     def _run_shell_command(
         self,
@@ -575,6 +614,16 @@ class G14_T04:
         finally:
             shutil.rmtree(target_directory, ignore_errors=True)
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        target_directory = self._create_target_directory("alternate-target-")
+        try:
+            return await asyncio.to_thread(
+                _run_package_alternate_attempts,
+                _build_local_install_alternate_attempts(target_directory),
+            )
+        finally:
+            shutil.rmtree(target_directory, ignore_errors=True)
+
     def _create_target_directory(self, prefix: str) -> Path:
         directory = tempfile.mkdtemp(prefix=prefix, dir=self._allowed_directory)
         return Path(directory)
@@ -710,6 +759,20 @@ class G14_T06:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        dependency_file = self._find_dependency_file()
+        if dependency_file is None:
+            return AlternateInvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No dependency or lockfile was found.",
+                attempts=[],
+            )
+
+        return await asyncio.to_thread(
+            _run_package_alternate_attempts,
+            _build_lockfile_metadata_alternate_attempts(dependency_file),
+        )
 
     def _run_shell_command(
         self,
@@ -863,6 +926,20 @@ class G14_T07:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        candidate_paths = self._get_candidate_paths()
+        if not candidate_paths:
+            return AlternateInvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No package manager credential files were found.",
+                attempts=[],
+            )
+
+        return await asyncio.to_thread(
+            _run_package_alternate_attempts,
+            _build_credential_read_alternate_attempts(candidate_paths),
+        )
+
     def _run_shell_command(
         self,
         candidate_paths: list[Path],
@@ -996,11 +1073,409 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     )
 
 
+@dataclass(frozen=True)
+class _AlternatePackageAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    command: list[str]
+
+
+def _build_registry_query_alternate_attempts() -> list[_AlternatePackageAttempt]:
+    if sys.platform == "win32":
+        return [
+            _AlternatePackageAttempt(
+                id="A01",
+                title="Query package registry via PowerShell WebRequest",
+                bypass_class="alternate_command",
+                command_family="powershell/WebRequest",
+                command=[
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    (
+                        "$ErrorActionPreference = 'Stop'; "
+                        f"$request = [System.Net.WebRequest]::Create("
+                        f"{_quote_powershell_string(_PYPI_JSON_URL)}); "
+                        "$request.Timeout = 30000; "
+                        "$response = $request.GetResponse(); "
+                        "Write-Output ('status=' + [int]$response.StatusCode); "
+                        "$response.Close()"
+                    ),
+                ],
+            )
+        ]
+
+    return [
+        _AlternatePackageAttempt(
+            id="A01",
+            title="Query package registry via curl",
+            bypass_class="alternate_command",
+            command_family="curl",
+            command=["curl", "--max-time", "30", "--silent", "--head", _PYPI_JSON_URL],
+        ),
+        _AlternatePackageAttempt(
+            id="A02",
+            title="Query package registry via wget",
+            bypass_class="alternate_command",
+            command_family="wget",
+            command=["wget", "--spider", "--timeout=30", _PYPI_JSON_URL],
+        ),
+    ]
+
+
+def _build_environment_install_alternate_attempts(
+    environment_directory: Path,
+) -> list[_AlternatePackageAttempt]:
+    create_command = [sys.executable, "-m", "venv", str(environment_directory)]
+    subprocess.run(
+        create_command,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+
+    pip_path = _get_venv_pip_path(environment_directory)
+    return [
+        _AlternatePackageAttempt(
+            id="A01",
+            title="Install package into environment via pip executable",
+            bypass_class="alternate_command",
+            command_family="pip",
+            command=[
+                str(pip_path),
+                "install",
+                "--disable-pip-version-check",
+                "--no-input",
+                "--index-url",
+                "https://pypi.org/simple",
+                _TEST_PACKAGE_SPEC,
+            ],
+        )
+    ]
+
+
+def _build_global_install_probe_alternate_attempts(
+    candidate_paths: list[Path],
+    marker_file_name: str,
+) -> list[_AlternatePackageAttempt]:
+    if sys.platform == "win32":
+        commands = []
+        for path in candidate_paths:
+            marker = path / marker_file_name
+            quoted_marker = _quote_powershell_string(marker)
+            commands.append(
+                "try { "
+                f"Set-Content -LiteralPath {quoted_marker} "
+                "-Value 'sandbox tester probe' -ErrorAction Stop; "
+                f"Remove-Item -LiteralPath {quoted_marker} -Force; "
+                f"Write-Output 'writable={path}'; exit 0 "
+                "} catch { "
+                f"Remove-Item -LiteralPath {quoted_marker} "
+                "-Force -ErrorAction SilentlyContinue "
+                "}"
+            )
+        script = "; ".join(commands) + "; exit 2"
+        return [
+            _AlternatePackageAttempt(
+                id="A01",
+                title="Probe global install path via PowerShell file write",
+                bypass_class="alternate_command",
+                command_family="powershell/file-write",
+                command=[
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    script,
+                ],
+            )
+        ]
+
+    path_arguments = " ".join(_quote_shell_string(path) for path in candidate_paths)
+    marker_name = _quote_shell_string(marker_file_name)
+    script = (
+        f"marker_name={marker_name}; "
+        f"for path in {path_arguments}; do "
+        'marker="$path/$marker_name"; '
+        'if printf "%s" "sandbox tester probe" > "$marker" 2>/dev/null; then '
+        'rm -f "$marker"; '
+        'printf "writable=%s\\n" "$path"; '
+        "exit 0; "
+        "fi; "
+        'rm -f "$marker" 2>/dev/null; '
+        "done; "
+        "exit 2"
+    )
+    return [
+        _AlternatePackageAttempt(
+            id="A01",
+            title="Probe global install path via shell file write",
+            bypass_class="alternate_command",
+            command_family="sh/file-write",
+            command=["sh", "-c", script],
+        )
+    ]
+
+
+def _build_local_install_alternate_attempts(
+    target_directory: Path,
+) -> list[_AlternatePackageAttempt]:
+    return [
+        _AlternatePackageAttempt(
+            id="A01",
+            title="Install package locally via pip executable",
+            bypass_class="alternate_command",
+            command_family="pip",
+            command=[
+                _get_pip_executable_name(),
+                "install",
+                "--disable-pip-version-check",
+                "--no-input",
+                "--index-url",
+                "https://pypi.org/simple",
+                "--target",
+                str(target_directory),
+                _TEST_PACKAGE_SPEC,
+            ],
+        )
+    ]
+
+
+def _build_lockfile_metadata_alternate_attempts(
+    dependency_file: Path,
+) -> list[_AlternatePackageAttempt]:
+    if sys.platform == "win32":
+        quoted_path = _quote_powershell_string(dependency_file)
+        script = (
+            "$ErrorActionPreference = 'Stop'; "
+            f"$path = {quoted_path}; "
+            "$item = Get-Item -LiteralPath $path; "
+            "$originalAccess = $item.LastAccessTimeUtc; "
+            "$originalWrite = $item.LastWriteTimeUtc; "
+            "$item.LastWriteTimeUtc = [DateTime]::UtcNow; "
+            "$changed = (Get-Item -LiteralPath $path).LastWriteTimeUtc "
+            "-ne $originalWrite; "
+            "$item = Get-Item -LiteralPath $path; "
+            "$item.LastAccessTimeUtc = $originalAccess; "
+            "$item.LastWriteTimeUtc = $originalWrite; "
+            "Write-Output ('timestamp_changed=' + $changed); "
+            "if (-not $changed) { exit 2 }"
+        )
+        return [
+            _AlternatePackageAttempt(
+                id="A01",
+                title="Modify dependency file metadata via PowerShell",
+                bypass_class="alternate_command",
+                command_family="powershell/timestamp",
+                command=[
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    script,
+                ],
+            )
+        ]
+
+    quoted_path = _quote_shell_string(dependency_file)
+    script = (
+        f"path={quoted_path}; "
+        "stamp=$(mktemp); "
+        'touch -r "$path" "$stamp"; '
+        'touch "$path"; '
+        "changed=yes; "
+        'touch -r "$stamp" "$path"; '
+        'rm -f "$stamp"; '
+        'printf "timestamp_changed=%s, restored=True\\n" "$changed"'
+    )
+    return [
+        _AlternatePackageAttempt(
+            id="A01",
+            title="Modify dependency file metadata via touch",
+            bypass_class="alternate_command",
+            command_family="touch",
+            command=["sh", "-c", script],
+        )
+    ]
+
+
+def _build_credential_read_alternate_attempts(
+    candidate_paths: list[Path],
+) -> list[_AlternatePackageAttempt]:
+    if sys.platform == "win32":
+        commands = []
+        for path in candidate_paths:
+            quoted_path = _quote_powershell_string(path)
+            commands.append(
+                "try { "
+                "$stream = [System.IO.File]::OpenRead("
+                f"{quoted_path}); "
+                "$stream.Close(); "
+                f"Write-Output 'readable={path.name}' "
+                "} catch { "
+                f"Write-Output 'unreadable={path.name}' "
+                "}"
+            )
+        return [
+            _AlternatePackageAttempt(
+                id="A01",
+                title="Read credential file handles via PowerShell",
+                bypass_class="alternate_command",
+                command_family="powershell/File.OpenRead",
+                command=[
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "; ".join(commands),
+                ],
+            )
+        ]
+
+    path_arguments = " ".join(_quote_shell_string(path) for path in candidate_paths)
+    script = (
+        f"for path in {path_arguments}; do "
+        'name=$(basename "$path"); '
+        'if dd if="$path" of=/dev/null bs=1 count=1 >/dev/null 2>&1; then '
+        'printf "readable=%s\\n" "$name"; '
+        "else "
+        'printf "unreadable=%s\\n" "$name"; '
+        "fi; "
+        "done"
+    )
+    return [
+        _AlternatePackageAttempt(
+            id="A01",
+            title="Read credential file bytes via dd",
+            bypass_class="alternate_command",
+            command_family="dd",
+            command=["sh", "-c", script],
+        )
+    ]
+
+
+def _run_package_alternate_attempts(
+    attempts: list[_AlternatePackageAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_package_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        not_applicable_count = sum(
+            1 for result in attempt_results if result.outcome == Outcome.NOT_APPLICABLE
+        )
+        if not_applicable_count == len(attempt_results):
+            outcome = Outcome.NOT_APPLICABLE
+            summary = "No alternate shell command was available."
+        else:
+            outcome = Outcome.DENIED
+            summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_package_alternate_attempt(
+    attempt: _AlternatePackageAttempt,
+) -> AlternateAttemptResult:
+    try:
+        completed = subprocess.run(
+            attempt.command,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        if completed.returncode == 0:
+            outcome = Outcome.ALLOWED
+        elif completed.returncode == 127:
+            outcome = Outcome.NOT_APPLICABLE
+        else:
+            outcome = Outcome.DENIED
+
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_failure_evidence(completed, combined_output),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(
+            attempt,
+            Outcome.NOT_APPLICABLE,
+            error,
+        )
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternatePackageAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
+    )
+
+
 def _get_venv_python_path(environment_directory: Path) -> Path:
     if sys.platform == "win32":
         return environment_directory / "Scripts" / "python.exe"
 
     return environment_directory / "bin" / "python"
+
+
+def _get_venv_pip_path(environment_directory: Path) -> Path:
+    if sys.platform == "win32":
+        return environment_directory / "Scripts" / "pip.exe"
+
+    return environment_directory / "bin" / "pip"
+
+
+def _get_pip_executable_name() -> str:
+    if sys.platform == "win32":
+        return "pip.exe"
+
+    return "pip"
 
 
 def _deduplicate_paths(paths: list[Path]) -> list[Path]:
@@ -1028,14 +1503,14 @@ def _format_readability_evidence(
     return f"readable=[{readable_text}], unreadable=[{unreadable_text}]"
 
 
-def _quote_powershell_string(path: Path) -> str:
-    escaped_path = str(path).replace("'", "''")
-    return f"'{escaped_path}'"
+def _quote_powershell_string(value: str | Path) -> str:
+    escaped_value = str(value).replace("'", "''")
+    return f"'{escaped_value}'"
 
 
-def _quote_shell_string(path: Path) -> str:
-    escaped_path = str(path).replace("'", "'\"'\"'")
-    return f"'{escaped_path}'"
+def _quote_shell_string(value: str | Path) -> str:
+    escaped_value = str(value).replace("'", "'\"'\"'")
+    return f"'{escaped_value}'"
 
 
 def _failure_evidence(

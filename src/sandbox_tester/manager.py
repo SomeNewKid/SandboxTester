@@ -24,14 +24,6 @@ from .group_19 import get_group as get_group_19
 from .group_20 import get_group as get_group_20
 from .group_21 import get_group as get_group_21
 from .group_22 import get_group as get_group_22
-from .group_23 import get_group as get_group_23
-from .group_24 import get_group as get_group_24
-from .group_25 import get_group as get_group_25
-from .group_26 import get_group as get_group_26
-from .group_27 import get_group as get_group_27
-from .group_28 import get_group as get_group_28
-from .group_29 import get_group as get_group_29
-from .group_30 import get_group as get_group_30
 from .reporter import TestReporter
 from .testing import (
     CapabilityContext,
@@ -63,14 +55,6 @@ GROUP_FACTORIES: list[Callable[[CapabilityContext], CapabilityGroup]] = [
     get_group_20,
     get_group_21,
     get_group_22,
-    get_group_23,
-    get_group_24,
-    get_group_25,
-    get_group_26,
-    get_group_27,
-    get_group_28,
-    get_group_29,
-    get_group_30,
 ]
 
 

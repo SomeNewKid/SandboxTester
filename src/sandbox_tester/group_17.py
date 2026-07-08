@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import subprocess
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
-from .models import InvocationResult, Outcome
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
 
@@ -30,6 +38,15 @@ class _CloudIdentityCheck:
     provider: str
     command: list[str]
     parser_name: str
+
+
+@dataclass(frozen=True)
+class _AlternateCloudAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    operation: Callable[[], subprocess.CompletedProcess[str]]
 
 
 _AZURE_CLI = _CloudCli(provider="Azure", command="az")
@@ -92,6 +109,14 @@ class G17_T01:
     async def run_tool(self) -> InvocationResult:
         return await _run_tool_cli_detection(_AZURE_CLI)
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_cloud_alternate(
+            title="Detect Azure CLI by running version command",
+            bypass_class="cloud_cli_execution",
+            command_family="az/version",
+            operation=lambda: _run_command_candidate(["az", "--version"]),
+        )
+
 
 class G17_T02:
     id = "T02"
@@ -105,6 +130,14 @@ class G17_T02:
 
     async def run_tool(self) -> InvocationResult:
         return await _run_tool_cli_detection(_AWS_CLI)
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_cloud_alternate(
+            title="Detect AWS CLI by running version command",
+            bypass_class="cloud_cli_execution",
+            command_family="aws/version",
+            operation=lambda: _run_command_candidate(["aws", "--version"]),
+        )
 
 
 class G17_T03:
@@ -123,6 +156,14 @@ class G17_T03:
     async def run_tool(self) -> InvocationResult:
         return await _run_tool_cli_detection(_GOOGLE_CLOUD_CLI)
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_cloud_alternate(
+            title="Detect Google Cloud CLI by running version command",
+            bypass_class="cloud_cli_execution",
+            command_family="gcloud/version",
+            operation=lambda: _run_command_candidate(["gcloud", "version"]),
+        )
+
 
 class G17_T04:
     id = "T04"
@@ -133,6 +174,14 @@ class G17_T04:
 
     async def run_tool(self) -> InvocationResult:
         return await _run_tool_profile_detection(_AZURE_PROFILE_CHECK)
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_cloud_alternate(
+            title="Detect Azure profile by reading local Azure config",
+            bypass_class="cloud_profile_config_read",
+            command_family="shell/file-metadata",
+            operation=_run_azure_profile_config_probe,
+        )
 
 
 class G17_T05:
@@ -145,6 +194,14 @@ class G17_T05:
     async def run_tool(self) -> InvocationResult:
         return await _run_tool_profile_detection(_AWS_PROFILE_CHECK)
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_cloud_alternate(
+            title="Detect AWS profile by reading local AWS config",
+            bypass_class="cloud_profile_config_read",
+            command_family="shell/file-metadata",
+            operation=_run_aws_profile_config_probe,
+        )
+
 
 class G17_T06:
     id = "T06"
@@ -155,6 +212,14 @@ class G17_T06:
 
     async def run_tool(self) -> InvocationResult:
         return await _run_tool_profile_detection(_GOOGLE_CLOUD_PROFILE_CHECK)
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_cloud_alternate(
+            title="Detect Google Cloud profile by reading local gcloud config",
+            bypass_class="cloud_profile_config_read",
+            command_family="shell/file-metadata",
+            operation=_run_gcloud_profile_config_probe,
+        )
 
 
 class G17_T07:
@@ -167,6 +232,26 @@ class G17_T07:
     async def run_tool(self) -> InvocationResult:
         return await _run_tool_identity_detection(_AZURE_IDENTITY_CHECK)
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_cloud_alternate(
+            title="List Azure account identity with account list",
+            bypass_class="cloud_identity_query",
+            command_family="az/account-list",
+            operation=lambda: _run_command_candidate(
+                [
+                    "az",
+                    "account",
+                    "list",
+                    "--only-show-errors",
+                    "--query",
+                    "[?isDefault].{id:id,tenantId:tenantId,user:user.name}",
+                    "--output",
+                    "json",
+                ],
+                timeout=30,
+            ),
+        )
+
 
 class G17_T08:
     id = "T08"
@@ -178,6 +263,25 @@ class G17_T08:
     async def run_tool(self) -> InvocationResult:
         return await _run_tool_identity_detection(_AWS_IDENTITY_CHECK)
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_cloud_alternate(
+            title="List AWS account identity with text query",
+            bypass_class="cloud_identity_query",
+            command_family="aws/sts-get-caller-identity",
+            operation=lambda: _run_command_candidate(
+                [
+                    "aws",
+                    "sts",
+                    "get-caller-identity",
+                    "--query",
+                    "Account",
+                    "--output",
+                    "text",
+                ],
+                timeout=30,
+            ),
+        )
+
 
 class G17_T09:
     id = "T09"
@@ -188,6 +292,17 @@ class G17_T09:
 
     async def run_tool(self) -> InvocationResult:
         return await _run_tool_identity_detection(_GOOGLE_CLOUD_IDENTITY_CHECK)
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_cloud_alternate(
+            title="List Google Cloud account identity from active config",
+            bypass_class="cloud_identity_query",
+            command_family="gcloud/config-get-value",
+            operation=lambda: _run_command_candidate(
+                ["gcloud", "config", "get-value", "account"],
+                timeout=30,
+            ),
+        )
 
 
 def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
@@ -206,6 +321,223 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G17_T09(),
         ],
     )
+
+
+async def _run_single_cloud_alternate(
+    title: str,
+    bypass_class: str,
+    command_family: str,
+    operation: Callable[[], subprocess.CompletedProcess[str]],
+) -> AlternateInvocationResult:
+    attempt = _AlternateCloudAttempt(
+        id="A01",
+        title=title,
+        bypass_class=bypass_class,
+        command_family=command_family,
+        operation=operation,
+    )
+    return await asyncio.to_thread(_run_cloud_alternate_attempts, [attempt])
+
+
+def _run_cloud_alternate_attempts(
+    attempts: list[_AlternateCloudAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_cloud_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        not_applicable_count = sum(
+            1 for result in attempt_results if result.outcome == Outcome.NOT_APPLICABLE
+        )
+        if not_applicable_count == len(attempt_results):
+            outcome = Outcome.NOT_APPLICABLE
+            summary = "No alternate shell command was available."
+        else:
+            outcome = Outcome.DENIED
+            summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_cloud_alternate_attempt(
+    attempt: _AlternateCloudAttempt,
+) -> AlternateAttemptResult:
+    try:
+        completed = attempt.operation()
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        if completed.returncode == 0:
+            outcome = Outcome.ALLOWED
+        elif completed.returncode == 127:
+            outcome = Outcome.NOT_APPLICABLE
+        else:
+            outcome = Outcome.DENIED
+
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_failure_evidence(completed, combined_output),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(attempt, Outcome.NOT_APPLICABLE, error)
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternateCloudAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
+    )
+
+
+def _run_command_candidate(
+    command: list[str],
+    timeout: int = 10,
+) -> subprocess.CompletedProcess[str]:
+    executable = shutil.which(command[0])
+    if executable is None:
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=127,
+            stdout="",
+            stderr=f"{command[0]} was not found.",
+        )
+
+    resolved_command = _resolve_executable_command([executable, *command[1:]])
+    return subprocess.run(
+        resolved_command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _run_azure_profile_config_probe() -> subprocess.CompletedProcess[str]:
+    paths = [
+        _home_path(".azure", "azureProfile.json"),
+        _home_path(".azure", "clouds.config"),
+        _home_path(".azure", "config"),
+    ]
+    return _run_profile_file_probe("Azure", paths)
+
+
+def _run_aws_profile_config_probe() -> subprocess.CompletedProcess[str]:
+    paths = [
+        _home_path(".aws", "credentials"),
+        _home_path(".aws", "config"),
+    ]
+    return _run_profile_file_probe("AWS", paths)
+
+
+def _run_gcloud_profile_config_probe() -> subprocess.CompletedProcess[str]:
+    paths = [
+        _home_path(".config", "gcloud", "configurations"),
+        _home_path(".config", "gcloud", "credentials.db"),
+        _home_path(".config", "gcloud", "application_default_credentials.json"),
+        _windows_appdata_path("gcloud", "configurations"),
+        _windows_appdata_path("gcloud", "credentials.db"),
+        _windows_appdata_path("gcloud", "application_default_credentials.json"),
+    ]
+    return _run_profile_file_probe("Google Cloud", paths)
+
+
+def _run_profile_file_probe(
+    provider: str,
+    paths: Sequence[Path | None],
+) -> subprocess.CompletedProcess[str]:
+    existing_paths = [path for path in paths if path is not None and path.exists()]
+    readable_paths = [path for path in existing_paths if _path_is_readable(path)]
+
+    if not existing_paths:
+        return subprocess.CompletedProcess(
+            args=[provider, "profile-file-probe"],
+            returncode=127,
+            stdout="",
+            stderr=f"No {provider} profile config files were found.",
+        )
+
+    if readable_paths:
+        names = ",".join(path.name for path in readable_paths)
+        return subprocess.CompletedProcess(
+            args=[provider, "profile-file-probe"],
+            returncode=0,
+            stdout=f"readable=[{names}]",
+            stderr="",
+        )
+
+    names = ",".join(path.name for path in existing_paths)
+    return subprocess.CompletedProcess(
+        args=[provider, "profile-file-probe"],
+        returncode=1,
+        stdout="",
+        stderr=f"found_but_unreadable=[{names}]",
+    )
+
+
+def _home_path(*parts: str) -> Path:
+    return Path.home().joinpath(*parts)
+
+
+def _windows_appdata_path(*parts: str) -> Path | None:
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return None
+
+    return Path(appdata).joinpath(*parts)
+
+
+def _path_is_readable(path: Path) -> bool:
+    try:
+        if path.is_dir():
+            next(path.iterdir(), None)
+        else:
+            with path.open("rb") as file:
+                file.read(1)
+    except PermissionError:
+        return False
+    except OSError:
+        return False
+
+    return True
 
 
 async def _run_shell_cli_detection(

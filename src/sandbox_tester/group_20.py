@@ -8,9 +8,15 @@ import subprocess
 import uuid
 import wave
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
-from .models import InvocationResult, Outcome
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
 _NO_SHELL_CANDIDATE_EXIT_CODE = 127
@@ -18,6 +24,15 @@ _CAMERA_FRAME_FILE_NAME = "camera-frame.jpg"
 _AUDIO_SAMPLE_FILE_NAME = "microphone-sample.wav"
 _AUDIO_SAMPLE_SECONDS = 1
 _AUDIO_SAMPLE_RATE = 16000
+
+
+@dataclass(frozen=True)
+class _AlternateHardwareAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    operation: Callable[[], subprocess.CompletedProcess[str]]
 
 
 class G20_T01:
@@ -115,6 +130,16 @@ class G20_T01:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_hardware_alternate(
+            title="Read camera availability with platform device query",
+            bypass_class="camera_device_enumeration",
+            command_family=_device_query_command_family(self._operating_system),
+            operation=lambda: _run_camera_availability_command(
+                self._operating_system,
+            ),
+        )
 
 
 class G20_T02:
@@ -233,6 +258,23 @@ class G20_T02:
         finally:
             frame_path.unlink(missing_ok=True)
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if not self._allow_camera_capture:
+            return _hardware_alternate_not_applicable(
+                "Camera capture was not enabled in capability context."
+            )
+
+        frame_path = _build_camera_frame_path(self._allowed_directory)
+        return await _run_single_hardware_alternate(
+            title="Capture camera frame with ffmpeg",
+            bypass_class="camera_frame_capture",
+            command_family="ffmpeg",
+            operation=lambda: _run_camera_capture_alternate(
+                self._operating_system,
+                frame_path,
+            ),
+        )
+
 
 class G20_T03:
     id = "T03"
@@ -331,6 +373,16 @@ class G20_T03:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_hardware_alternate(
+            title="Read microphone availability with platform device query",
+            bypass_class="microphone_device_enumeration",
+            command_family=_device_query_command_family(self._operating_system),
+            operation=lambda: _run_microphone_availability_command(
+                self._operating_system,
+            ),
+        )
 
 
 class G20_T04:
@@ -450,6 +502,23 @@ class G20_T04:
         finally:
             sample_path.unlink(missing_ok=True)
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        if not self._allow_microphone_capture:
+            return _hardware_alternate_not_applicable(
+                "Microphone capture was not enabled in capability context."
+            )
+
+        sample_path = _build_audio_sample_path(self._allowed_directory)
+        return await _run_single_hardware_alternate(
+            title="Capture audio sample with ffmpeg",
+            bypass_class="microphone_audio_capture",
+            command_family="ffmpeg",
+            operation=lambda: _run_audio_capture_alternate(
+                self._operating_system,
+                sample_path,
+            ),
+        )
+
 
 class G20_T05:
     id = "T05"
@@ -547,6 +616,14 @@ class G20_T05:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_hardware_alternate(
+            title="Access printer list with platform printer query",
+            bypass_class="printer_list_enumeration",
+            command_family=_printer_query_command_family(self._operating_system),
+            operation=lambda: _run_printer_list_command(self._operating_system),
+        )
+
 
 class G20_T07:
     id = "T07"
@@ -574,6 +651,14 @@ class G20_T07:
             _read_usb_device_list,
             allowed_summary="Python runtime accessed the USB device list.",
             denied_summary="Python runtime USB device list query failed.",
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_hardware_alternate(
+            title="Access USB device list with platform device query",
+            bypass_class="usb_device_enumeration",
+            command_family=_usb_query_command_family(self._operating_system),
+            operation=lambda: _run_usb_device_list_command(self._operating_system),
         )
 
 
@@ -605,6 +690,14 @@ class G20_T08:
             denied_summary="Python runtime serial port query failed.",
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_hardware_alternate(
+            title="Access serial port metadata with platform device query",
+            bypass_class="serial_port_enumeration",
+            command_family=_serial_query_command_family(self._operating_system),
+            operation=lambda: _run_serial_port_list_command(self._operating_system),
+        )
+
 
 class G20_T09:
     id = "T09"
@@ -634,6 +727,16 @@ class G20_T09:
             denied_summary="Python runtime Bluetooth device list query failed.",
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_hardware_alternate(
+            title="Access Bluetooth device list with platform device query",
+            bypass_class="bluetooth_device_enumeration",
+            command_family=_bluetooth_query_command_family(self._operating_system),
+            operation=lambda: _run_bluetooth_device_list_command(
+                self._operating_system,
+            ),
+        )
+
 
 class G20_T10:
     id = "T10"
@@ -661,6 +764,14 @@ class G20_T10:
             denied_summary="Python runtime GPU details query failed.",
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_single_hardware_alternate(
+            title="Access GPU details with platform device query",
+            bypass_class="gpu_details_enumeration",
+            command_family=_gpu_query_command_family(self._operating_system),
+            operation=lambda: _run_gpu_details_command(self._operating_system),
+        )
+
 
 def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
     return CapabilityGroup(
@@ -678,6 +789,217 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G20_T10(capability_context),
         ],
     )
+
+
+async def _run_single_hardware_alternate(
+    title: str,
+    bypass_class: str,
+    command_family: str,
+    operation: Callable[[], subprocess.CompletedProcess[str]],
+) -> AlternateInvocationResult:
+    attempt = _AlternateHardwareAttempt(
+        id="A01",
+        title=title,
+        bypass_class=bypass_class,
+        command_family=command_family,
+        operation=operation,
+    )
+    return await asyncio.to_thread(_run_hardware_alternate_attempts, [attempt])
+
+
+def _run_hardware_alternate_attempts(
+    attempts: list[_AlternateHardwareAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_hardware_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        not_applicable_count = sum(
+            1 for result in attempt_results if result.outcome == Outcome.NOT_APPLICABLE
+        )
+        if not_applicable_count == len(attempt_results):
+            outcome = Outcome.NOT_APPLICABLE
+            summary = "No alternate shell command was available."
+        else:
+            outcome = Outcome.DENIED
+            summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_hardware_alternate_attempt(
+    attempt: _AlternateHardwareAttempt,
+) -> AlternateAttemptResult:
+    try:
+        completed = attempt.operation()
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        if completed.returncode == 0:
+            outcome = Outcome.ALLOWED
+        elif completed.returncode == _NO_SHELL_CANDIDATE_EXIT_CODE:
+            outcome = Outcome.NOT_APPLICABLE
+        else:
+            outcome = Outcome.DENIED
+
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_failure_evidence(completed, combined_output),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(
+            attempt,
+            Outcome.NOT_APPLICABLE,
+            error,
+        )
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternateHardwareAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
+    )
+
+
+def _hardware_alternate_not_applicable(summary: str) -> AlternateInvocationResult:
+    return AlternateInvocationResult(
+        outcome=Outcome.NOT_APPLICABLE,
+        summary=summary,
+        attempts=[],
+    )
+
+
+def _run_camera_capture_alternate(
+    operating_system: OperatingSystem,
+    frame_path: Path,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        completed = _run_shell_camera_capture_command(operating_system, frame_path)
+        if completed.returncode != 0:
+            return completed
+
+        if not _captured_frame_exists(frame_path):
+            return subprocess.CompletedProcess(
+                args=completed.args,
+                returncode=1,
+                stdout="",
+                stderr="Camera command succeeded, but no frame was captured.",
+            )
+
+        return subprocess.CompletedProcess(
+            args=completed.args,
+            returncode=0,
+            stdout=_capture_evidence(frame_path),
+            stderr=completed.stderr,
+        )
+    finally:
+        frame_path.unlink(missing_ok=True)
+
+
+def _run_audio_capture_alternate(
+    operating_system: OperatingSystem,
+    sample_path: Path,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        completed = _run_shell_audio_capture_command(operating_system, sample_path)
+        if completed.returncode != 0:
+            return completed
+
+        if not _captured_sample_exists(sample_path):
+            return subprocess.CompletedProcess(
+                args=completed.args,
+                returncode=1,
+                stdout="",
+                stderr="Audio command succeeded, but no sample was captured.",
+            )
+
+        return subprocess.CompletedProcess(
+            args=completed.args,
+            returncode=0,
+            stdout=_sample_evidence(sample_path),
+            stderr=completed.stderr,
+        )
+    finally:
+        sample_path.unlink(missing_ok=True)
+
+
+def _device_query_command_family(operating_system: OperatingSystem) -> str:
+    if operating_system == OperatingSystem.WINDOWS:
+        return "powershell/pnp-cim"
+
+    return "sh/dev-sysfs"
+
+
+def _printer_query_command_family(operating_system: OperatingSystem) -> str:
+    if operating_system == OperatingSystem.WINDOWS:
+        return "powershell/printer-cim"
+
+    return "lpstat"
+
+
+def _usb_query_command_family(operating_system: OperatingSystem) -> str:
+    if operating_system == OperatingSystem.WINDOWS:
+        return "powershell/pnp-cim"
+
+    return "lsusb/sysfs"
+
+
+def _serial_query_command_family(operating_system: OperatingSystem) -> str:
+    if operating_system == OperatingSystem.WINDOWS:
+        return "powershell/pnp-cim"
+
+    return "sh/dev"
+
+
+def _bluetooth_query_command_family(operating_system: OperatingSystem) -> str:
+    if operating_system == OperatingSystem.WINDOWS:
+        return "powershell/pnp-cim"
+
+    return "bluetoothctl/sysfs"
+
+
+def _gpu_query_command_family(operating_system: OperatingSystem) -> str:
+    if operating_system == OperatingSystem.WINDOWS:
+        return "powershell/cim"
+
+    return "lspci/sysfs"
 
 
 def _run_camera_availability_command(

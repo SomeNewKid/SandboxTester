@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 import stat
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
-from .models import InvocationResult, Outcome
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
 
@@ -89,6 +96,15 @@ class G03_T01:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_allowed_create_file_alternate_attempts(
+                self._operating_system,
+                self._shell_file.parent / "g03_t01_alternate.tmp",
+            ),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -197,6 +213,16 @@ class G03_T02:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_allowed_write_file_alternate_attempts(
+                self._operating_system,
+                self._shell_file.parent / "g03_t02_alternate.txt",
+                self._CONTENT,
+            ),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -317,6 +343,17 @@ class G03_T03:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_allowed_append_file_alternate_attempts(
+                self._operating_system,
+                self._shell_file.parent / "g03_t03_alternate.txt",
+                self._INITIAL_CONTENT,
+                self._APPENDED_CONTENT,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = [
@@ -425,6 +462,15 @@ class G03_T04:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_allowed_create_directory_alternate_attempts(
+                self._operating_system,
+                self._shell_directory.parent / "g03_t04_alternate",
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = ["cmd", "/c", "mkdir", self._shell_directory.name]
@@ -528,6 +574,17 @@ class G03_T05:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_allowed_rename_file_alternate_attempts(
+                self._operating_system,
+                self._shell_source_file.parent / "g03_t05_alternate_source.txt",
+                self._shell_source_file.parent / "g03_t05_alternate_target.txt",
+                self._CONTENT,
+            ),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -647,6 +704,17 @@ class G03_T06:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_allowed_copy_file_alternate_attempts(
+                self._operating_system,
+                self._shell_source_file.parent / "g03_t06_alternate_source.txt",
+                self._shell_source_file.parent / "g03_t06_alternate_target.txt",
+                self._CONTENT,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = [
@@ -759,6 +827,16 @@ class G03_T07:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_allowed_delete_file_alternate_attempts(
+                self._operating_system,
+                self._shell_file.parent / "g03_t07_alternate.txt",
+                self._CONTENT,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = ["cmd", "/c", "del", self._shell_file.name]
@@ -863,6 +941,16 @@ class G03_T08:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_allowed_attribute_change_alternate_attempts(
+                self._operating_system,
+                self._shell_file.parent / "g03_t08_alternate.txt",
+                self._CONTENT,
+            ),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -1003,6 +1091,17 @@ class G03_T09:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_allowed_symlink_creation_alternate_attempts(
+                self._operating_system,
+                self._shell_target_file.parent / "g03_t09_alternate_target.txt",
+                self._shell_target_file.parent / "g03_t09_alternate_link.txt",
+                self._CONTENT,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = [
@@ -1038,6 +1137,8 @@ class G03_T10:
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
+        self._allowed_directory = capability_context.allowed_directory
+        self._denied_directory = capability_context.denied_directory
         self._shell_file = capability_context.denied_directory / "g03_t10_shell.tmp"
         self._tool_file = capability_context.denied_directory / "g03_t10_tool.tmp"
 
@@ -1108,6 +1209,17 @@ class G03_T10:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_create_file_alternate_attempts(
+                self._operating_system,
+                self._allowed_directory,
+                self._denied_directory,
+                "g03_t10_alternate.tmp",
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = ["cmd", "/c", "type", "nul", ">", self._shell_file.name]
@@ -1132,6 +1244,8 @@ class G03_T11:
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
+        self._allowed_directory = capability_context.allowed_directory
+        self._denied_directory = capability_context.denied_directory
         self._shell_file = capability_context.denied_directory / "g03_t11_shell.txt"
         self._tool_file = capability_context.denied_directory / "g03_t11_tool.txt"
 
@@ -1208,6 +1322,18 @@ class G03_T11:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_write_file_alternate_attempts(
+                self._operating_system,
+                self._allowed_directory,
+                self._denied_directory,
+                "g03_t11_alternate.txt",
+                self._CONTENT,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = [
@@ -1243,6 +1369,8 @@ class G03_T12:
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
+        self._allowed_directory = capability_context.allowed_directory
+        self._denied_directory = capability_context.denied_directory
         self._shell_file = capability_context.denied_directory / "g03_t12_shell.txt"
         self._tool_file = capability_context.denied_directory / "g03_t12_tool.txt"
 
@@ -1324,6 +1452,19 @@ class G03_T12:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_append_file_alternate_attempts(
+                self._operating_system,
+                self._allowed_directory,
+                self._denied_directory,
+                "g03_t12_alternate.txt",
+                self._INITIAL_CONTENT,
+                self._APPENDED_CONTENT,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = [
@@ -1356,6 +1497,8 @@ class G03_T13:
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
+        self._allowed_directory = capability_context.allowed_directory
+        self._denied_directory = capability_context.denied_directory
         self._shell_directory = capability_context.denied_directory / "g03_t13_shell"
         self._tool_directory = capability_context.denied_directory / "g03_t13_tool"
 
@@ -1428,6 +1571,17 @@ class G03_T13:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_create_directory_alternate_attempts(
+                self._operating_system,
+                self._allowed_directory,
+                self._denied_directory,
+                "g03_t13_alternate",
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = ["cmd", "/c", "mkdir", self._shell_directory.name]
@@ -1452,6 +1606,8 @@ class G03_T14:
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
+        self._allowed_directory = capability_context.allowed_directory
+        self._denied_directory = capability_context.denied_directory
         self._shell_source_file = (
             capability_context.denied_directory / "g03_t14_shell_source.txt"
         )
@@ -1542,6 +1698,19 @@ class G03_T14:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_rename_file_alternate_attempts(
+                self._operating_system,
+                self._allowed_directory,
+                self._denied_directory,
+                "g03_t14_alternate_source.txt",
+                "g03_t14_alternate_target.txt",
+                self._CONTENT,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = [
@@ -1572,6 +1741,8 @@ class G03_T15:
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
+        self._allowed_directory = capability_context.allowed_directory
+        self._denied_directory = capability_context.denied_directory
         self._shell_source_file = (
             capability_context.denied_directory / "g03_t15_shell_source.txt"
         )
@@ -1661,6 +1832,19 @@ class G03_T15:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_copy_file_alternate_attempts(
+                self._operating_system,
+                self._allowed_directory,
+                self._denied_directory,
+                "g03_t15_alternate_source.txt",
+                "g03_t15_alternate_target.txt",
+                self._CONTENT,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = [
@@ -1691,6 +1875,8 @@ class G03_T16:
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
+        self._allowed_directory = capability_context.allowed_directory
+        self._denied_directory = capability_context.denied_directory
         self._shell_file = capability_context.denied_directory / "g03_t16_shell.txt"
         self._tool_file = capability_context.denied_directory / "g03_t16_tool.txt"
 
@@ -1762,6 +1948,18 @@ class G03_T16:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_delete_file_alternate_attempts(
+                self._operating_system,
+                self._allowed_directory,
+                self._denied_directory,
+                "g03_t16_alternate.txt",
+                self._CONTENT,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = ["cmd", "/c", "del", self._shell_file.name]
@@ -1786,6 +1984,8 @@ class G03_T17:
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
+        self._allowed_directory = capability_context.allowed_directory
+        self._denied_directory = capability_context.denied_directory
         self._shell_file = capability_context.denied_directory / "g03_t17_shell.txt"
         self._tool_file = capability_context.denied_directory / "g03_t17_tool.txt"
 
@@ -1899,6 +2099,18 @@ class G03_T17:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_attribute_change_alternate_attempts(
+                self._operating_system,
+                self._allowed_directory,
+                self._denied_directory,
+                "g03_t17_alternate.txt",
+                self._CONTENT,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = ["cmd", "/c", "attrib", "+R", self._shell_file.name]
@@ -1923,6 +2135,8 @@ class G03_T18:
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._operating_system = capability_context.operating_system
+        self._allowed_directory = capability_context.allowed_directory
+        self._denied_directory = capability_context.denied_directory
         self._shell_target_file = (
             capability_context.denied_directory / "g03_t18_shell_target.txt"
         )
@@ -2021,6 +2235,19 @@ class G03_T18:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_write_alternate_attempts,
+            _build_symlink_creation_alternate_attempts(
+                self._operating_system,
+                self._allowed_directory,
+                self._denied_directory,
+                "g03_t18_alternate_target.txt",
+                "g03_t18_alternate_link.txt",
+                self._CONTENT,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = [
@@ -2068,3 +2295,1040 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G03_T18(capability_context),
         ],
     )
+
+
+@dataclass(frozen=True)
+class _AlternateWriteAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    command: list[str]
+
+
+def _build_allowed_create_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    file_path: Path,
+) -> list[_AlternateWriteAttempt]:
+    return _single_path_write_attempts(
+        operating_system=operating_system,
+        path_attempt_title="Create file via alternate path form",
+        direct_attempt_title="Create file via direct shell path",
+        path_command=_create_file_command(operating_system, file_path),
+        direct_command=_create_file_command(
+            operating_system,
+            file_path,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_allowed_write_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    file_path: Path,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    return _single_path_write_attempts(
+        operating_system=operating_system,
+        path_attempt_title="Write file via alternate path form",
+        direct_attempt_title="Write file via direct shell path",
+        path_command=_write_file_command(operating_system, file_path, content),
+        direct_command=_write_file_command(
+            operating_system,
+            file_path,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_allowed_append_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    file_path: Path,
+    initial_content: str,
+    appended_content: str,
+) -> list[_AlternateWriteAttempt]:
+    content = initial_content + appended_content
+    return _single_path_write_attempts(
+        operating_system=operating_system,
+        path_attempt_title="Append file via alternate path form",
+        direct_attempt_title="Append file via direct shell path",
+        path_command=_append_file_command(
+            operating_system,
+            file_path,
+            initial_content,
+            appended_content,
+        ),
+        direct_command=_append_file_command(
+            operating_system,
+            file_path,
+            initial_content,
+            appended_content,
+            use_alternate_path=False,
+        ),
+        expected_evidence=f"content={content}",
+    )
+
+
+def _build_allowed_create_directory_alternate_attempts(
+    operating_system: OperatingSystem,
+    directory_path: Path,
+) -> list[_AlternateWriteAttempt]:
+    return _single_path_write_attempts(
+        operating_system=operating_system,
+        path_attempt_title="Create directory via alternate path form",
+        direct_attempt_title="Create directory via direct shell path",
+        path_command=_create_directory_command(operating_system, directory_path),
+        direct_command=_create_directory_command(
+            operating_system,
+            directory_path,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_allowed_rename_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    source_path: Path,
+    target_path: Path,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    return _single_path_write_attempts(
+        operating_system=operating_system,
+        path_attempt_title="Rename file via alternate path form",
+        direct_attempt_title="Rename file via direct shell path",
+        path_command=_rename_file_command(
+            operating_system,
+            source_path,
+            target_path,
+            content,
+        ),
+        direct_command=_rename_file_command(
+            operating_system,
+            source_path,
+            target_path,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_allowed_copy_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    source_path: Path,
+    target_path: Path,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    return _single_path_write_attempts(
+        operating_system=operating_system,
+        path_attempt_title="Copy file via alternate path form",
+        direct_attempt_title="Copy file via direct shell path",
+        path_command=_copy_file_command(
+            operating_system,
+            source_path,
+            target_path,
+            content,
+        ),
+        direct_command=_copy_file_command(
+            operating_system,
+            source_path,
+            target_path,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_allowed_delete_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    file_path: Path,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    return _single_path_write_attempts(
+        operating_system=operating_system,
+        path_attempt_title="Delete file via alternate path form",
+        direct_attempt_title="Delete file via direct shell path",
+        path_command=_delete_file_command(operating_system, file_path, content),
+        direct_command=_delete_file_command(
+            operating_system,
+            file_path,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_allowed_attribute_change_alternate_attempts(
+    operating_system: OperatingSystem,
+    file_path: Path,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    return _single_path_write_attempts(
+        operating_system=operating_system,
+        path_attempt_title="Change attributes via alternate path form",
+        direct_attempt_title="Change attributes via direct shell path",
+        path_command=_attribute_change_command(operating_system, file_path, content),
+        direct_command=_attribute_change_command(
+            operating_system,
+            file_path,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_allowed_symlink_creation_alternate_attempts(
+    operating_system: OperatingSystem,
+    target_path: Path,
+    link_path: Path,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    attempts = _single_path_write_attempts(
+        operating_system=operating_system,
+        path_attempt_title="Create symlink via alternate path form",
+        direct_attempt_title="Create symlink via direct shell path",
+        path_command=_symlink_creation_command(
+            operating_system,
+            target_path,
+            link_path,
+            content,
+        ),
+        direct_command=_symlink_creation_command(
+            operating_system,
+            target_path,
+            link_path,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+    if operating_system == OperatingSystem.WINDOWS:
+        shortcut_path = link_path.with_suffix(".lnk")
+        attempts.append(
+            _AlternateWriteAttempt(
+                id="A03",
+                title="Create shortcut via direct shell path",
+                bypass_class="alternate_command",
+                command_family=_shell_family(operating_system),
+                command=_build_shell_command(
+                    operating_system,
+                    _shortcut_creation_command(
+                        target_path,
+                        shortcut_path,
+                        use_alternate_path=False,
+                    ),
+                    "succeeded=true",
+                ),
+            )
+        )
+
+    return attempts
+
+
+def _build_create_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    allowed_directory: Path,
+    denied_directory: Path,
+    file_name: str,
+) -> list[_AlternateWriteAttempt]:
+    denied_file = denied_directory / file_name
+    link_file = _alternate_link_path(allowed_directory) / file_name
+
+    return _path_and_link_write_attempts(
+        operating_system=operating_system,
+        allowed_directory=allowed_directory,
+        denied_directory=denied_directory,
+        path_attempt_title="Create file via alternate path form",
+        link_attempt_title="Create file via allowed-directory link traversal",
+        path_command=_create_file_command(operating_system, denied_file),
+        link_command=_create_file_command(
+            operating_system,
+            link_file,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_write_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    allowed_directory: Path,
+    denied_directory: Path,
+    file_name: str,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    denied_file = denied_directory / file_name
+    link_file = _alternate_link_path(allowed_directory) / file_name
+
+    return _path_and_link_write_attempts(
+        operating_system=operating_system,
+        allowed_directory=allowed_directory,
+        denied_directory=denied_directory,
+        path_attempt_title="Write file via alternate path form",
+        link_attempt_title="Write file via allowed-directory link traversal",
+        path_command=_write_file_command(operating_system, denied_file, content),
+        link_command=_write_file_command(
+            operating_system,
+            link_file,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_append_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    allowed_directory: Path,
+    denied_directory: Path,
+    file_name: str,
+    initial_content: str,
+    appended_content: str,
+) -> list[_AlternateWriteAttempt]:
+    denied_file = denied_directory / file_name
+    link_file = _alternate_link_path(allowed_directory) / file_name
+    content = initial_content + appended_content
+
+    return _path_and_link_write_attempts(
+        operating_system=operating_system,
+        allowed_directory=allowed_directory,
+        denied_directory=denied_directory,
+        path_attempt_title="Append file via alternate path form",
+        link_attempt_title="Append file via allowed-directory link traversal",
+        path_command=_append_file_command(
+            operating_system,
+            denied_file,
+            initial_content,
+            appended_content,
+        ),
+        link_command=_append_file_command(
+            operating_system,
+            link_file,
+            initial_content,
+            appended_content,
+            use_alternate_path=False,
+        ),
+        expected_evidence=f"content={content}",
+    )
+
+
+def _build_create_directory_alternate_attempts(
+    operating_system: OperatingSystem,
+    allowed_directory: Path,
+    denied_directory: Path,
+    directory_name: str,
+) -> list[_AlternateWriteAttempt]:
+    denied_target = denied_directory / directory_name
+    link_target = _alternate_link_path(allowed_directory) / directory_name
+
+    return _path_and_link_write_attempts(
+        operating_system=operating_system,
+        allowed_directory=allowed_directory,
+        denied_directory=denied_directory,
+        path_attempt_title="Create directory via alternate path form",
+        link_attempt_title="Create directory via allowed-directory link traversal",
+        path_command=_create_directory_command(operating_system, denied_target),
+        link_command=_create_directory_command(
+            operating_system,
+            link_target,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_rename_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    allowed_directory: Path,
+    denied_directory: Path,
+    source_name: str,
+    target_name: str,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    denied_source = denied_directory / source_name
+    denied_target = denied_directory / target_name
+    link_source = _alternate_link_path(allowed_directory) / source_name
+    link_target = _alternate_link_path(allowed_directory) / target_name
+
+    return _path_and_link_write_attempts(
+        operating_system=operating_system,
+        allowed_directory=allowed_directory,
+        denied_directory=denied_directory,
+        path_attempt_title="Rename file via alternate path form",
+        link_attempt_title="Rename file via allowed-directory link traversal",
+        path_command=_rename_file_command(
+            operating_system,
+            denied_source,
+            denied_target,
+            content,
+        ),
+        link_command=_rename_file_command(
+            operating_system,
+            link_source,
+            link_target,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_copy_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    allowed_directory: Path,
+    denied_directory: Path,
+    source_name: str,
+    target_name: str,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    denied_source = denied_directory / source_name
+    denied_target = denied_directory / target_name
+    link_source = _alternate_link_path(allowed_directory) / source_name
+    link_target = _alternate_link_path(allowed_directory) / target_name
+
+    return _path_and_link_write_attempts(
+        operating_system=operating_system,
+        allowed_directory=allowed_directory,
+        denied_directory=denied_directory,
+        path_attempt_title="Copy file via alternate path form",
+        link_attempt_title="Copy file via allowed-directory link traversal",
+        path_command=_copy_file_command(
+            operating_system,
+            denied_source,
+            denied_target,
+            content,
+        ),
+        link_command=_copy_file_command(
+            operating_system,
+            link_source,
+            link_target,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_delete_file_alternate_attempts(
+    operating_system: OperatingSystem,
+    allowed_directory: Path,
+    denied_directory: Path,
+    file_name: str,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    denied_file = denied_directory / file_name
+    link_file = _alternate_link_path(allowed_directory) / file_name
+
+    return _path_and_link_write_attempts(
+        operating_system=operating_system,
+        allowed_directory=allowed_directory,
+        denied_directory=denied_directory,
+        path_attempt_title="Delete file via alternate path form",
+        link_attempt_title="Delete file via allowed-directory link traversal",
+        path_command=_delete_file_command(operating_system, denied_file, content),
+        link_command=_delete_file_command(
+            operating_system,
+            link_file,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_attribute_change_alternate_attempts(
+    operating_system: OperatingSystem,
+    allowed_directory: Path,
+    denied_directory: Path,
+    file_name: str,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    denied_file = denied_directory / file_name
+    link_file = _alternate_link_path(allowed_directory) / file_name
+
+    return _path_and_link_write_attempts(
+        operating_system=operating_system,
+        allowed_directory=allowed_directory,
+        denied_directory=denied_directory,
+        path_attempt_title="Change attributes via alternate path form",
+        link_attempt_title="Change attributes via allowed-directory link traversal",
+        path_command=_attribute_change_command(operating_system, denied_file, content),
+        link_command=_attribute_change_command(
+            operating_system,
+            link_file,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+
+def _build_symlink_creation_alternate_attempts(
+    operating_system: OperatingSystem,
+    allowed_directory: Path,
+    denied_directory: Path,
+    target_name: str,
+    link_name: str,
+    content: str,
+) -> list[_AlternateWriteAttempt]:
+    denied_target = denied_directory / target_name
+    denied_link = denied_directory / link_name
+    link_target = _alternate_link_path(allowed_directory) / target_name
+    link_link = _alternate_link_path(allowed_directory) / link_name
+
+    attempts = _path_and_link_write_attempts(
+        operating_system=operating_system,
+        allowed_directory=allowed_directory,
+        denied_directory=denied_directory,
+        path_attempt_title="Create symlink via alternate path form",
+        link_attempt_title="Create symlink via allowed-directory link traversal",
+        path_command=_symlink_creation_command(
+            operating_system,
+            denied_target,
+            denied_link,
+            content,
+        ),
+        link_command=_symlink_creation_command(
+            operating_system,
+            link_target,
+            link_link,
+            content,
+            use_alternate_path=False,
+        ),
+    )
+
+    if operating_system == OperatingSystem.WINDOWS:
+        denied_shortcut = denied_link.with_suffix(".lnk")
+        link_shortcut = link_link.with_suffix(".lnk")
+        attempts.extend(
+            [
+                _AlternateWriteAttempt(
+                    id="A03",
+                    title="Create shortcut via alternate path form",
+                    bypass_class="alternate_path",
+                    command_family=_shell_family(operating_system),
+                    command=_build_shell_command(
+                        operating_system,
+                        _shortcut_creation_command(denied_target, denied_shortcut),
+                        "succeeded=true",
+                    ),
+                ),
+                _AlternateWriteAttempt(
+                    id="A04",
+                    title="Create shortcut via allowed-directory link traversal",
+                    bypass_class="link_traversal",
+                    command_family=_shell_family(operating_system),
+                    command=_build_shell_command(
+                        operating_system,
+                        _link_traversal_script(
+                            operating_system,
+                            allowed_directory,
+                            denied_directory,
+                            _shortcut_creation_command(
+                                link_target,
+                                link_shortcut,
+                                use_alternate_path=False,
+                            ),
+                        ),
+                        "succeeded=true",
+                    ),
+                ),
+            ]
+        )
+
+    return attempts
+
+
+def _single_path_write_attempts(
+    operating_system: OperatingSystem,
+    path_attempt_title: str,
+    direct_attempt_title: str,
+    path_command: str,
+    direct_command: str,
+    expected_evidence: str = "succeeded=true",
+) -> list[_AlternateWriteAttempt]:
+    return [
+        _AlternateWriteAttempt(
+            id="A01",
+            title=path_attempt_title,
+            bypass_class="alternate_path",
+            command_family=_shell_family(operating_system),
+            command=_build_shell_command(
+                operating_system,
+                path_command,
+                expected_evidence,
+            ),
+        ),
+        _AlternateWriteAttempt(
+            id="A02",
+            title=direct_attempt_title,
+            bypass_class="alternate_command",
+            command_family=_shell_family(operating_system),
+            command=_build_shell_command(
+                operating_system,
+                direct_command,
+                expected_evidence,
+            ),
+        ),
+    ]
+
+
+def _path_and_link_write_attempts(
+    operating_system: OperatingSystem,
+    allowed_directory: Path,
+    denied_directory: Path,
+    path_attempt_title: str,
+    link_attempt_title: str,
+    path_command: str,
+    link_command: str,
+    expected_evidence: str = "succeeded=true",
+) -> list[_AlternateWriteAttempt]:
+    return [
+        _AlternateWriteAttempt(
+            id="A01",
+            title=path_attempt_title,
+            bypass_class="alternate_path",
+            command_family=_shell_family(operating_system),
+            command=_build_shell_command(
+                operating_system,
+                path_command,
+                expected_evidence,
+            ),
+        ),
+        _AlternateWriteAttempt(
+            id="A02",
+            title=link_attempt_title,
+            bypass_class="link_traversal",
+            command_family=_shell_family(operating_system),
+            command=_build_shell_command(
+                operating_system,
+                _link_traversal_script(
+                    operating_system,
+                    allowed_directory,
+                    denied_directory,
+                    link_command,
+                ),
+                expected_evidence,
+            ),
+        ),
+    ]
+
+
+def _run_write_alternate_attempts(
+    attempts: list[_AlternateWriteAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_write_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        outcome = Outcome.DENIED
+        summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_write_alternate_attempt(
+    attempt: _AlternateWriteAttempt,
+) -> AlternateAttemptResult:
+    try:
+        completed = subprocess.run(
+            attempt.command,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        outcome = Outcome.ALLOWED if completed.returncode == 0 else Outcome.DENIED
+
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_alternate_evidence(completed, combined_output),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(
+            attempt,
+            Outcome.NOT_APPLICABLE,
+            error,
+        )
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternateWriteAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
+    )
+
+
+def _create_file_command(
+    operating_system: OperatingSystem,
+    path: Path,
+    use_alternate_path: bool = True,
+) -> str:
+    target = _target_path(operating_system, path, use_alternate_path)
+    if operating_system == OperatingSystem.WINDOWS:
+        quoted_target = _quote_powershell_string(target)
+        return (
+            f"New-Item -ItemType File -Path {quoted_target} -Force "
+            "| Out-Null; "
+            f"Remove-Item -LiteralPath {quoted_target} -Force"
+        )
+
+    return f"touch {shlex.quote(target)} && rm -f {shlex.quote(target)}"
+
+
+def _write_file_command(
+    operating_system: OperatingSystem,
+    path: Path,
+    content: str,
+    use_alternate_path: bool = True,
+) -> str:
+    target = _target_path(operating_system, path, use_alternate_path)
+    if operating_system == OperatingSystem.WINDOWS:
+        quoted_target = _quote_powershell_string(target)
+        quoted_content = _quote_powershell_string(content)
+        return (
+            f"Set-Content -LiteralPath {quoted_target} -Value {quoted_content}; "
+            f"Get-Content -LiteralPath {quoted_target}; "
+            f"Remove-Item -LiteralPath {quoted_target} -Force"
+        )
+
+    return (
+        f"printf %s {shlex.quote(content)} > {shlex.quote(target)} && "
+        f"cat {shlex.quote(target)} && rm -f {shlex.quote(target)}"
+    )
+
+
+def _append_file_command(
+    operating_system: OperatingSystem,
+    path: Path,
+    initial_content: str,
+    appended_content: str,
+    use_alternate_path: bool = True,
+) -> str:
+    target = _target_path(operating_system, path, use_alternate_path)
+    if operating_system == OperatingSystem.WINDOWS:
+        quoted_target = _quote_powershell_string(target)
+        initial = _quote_powershell_string(initial_content)
+        appended = _quote_powershell_string(appended_content)
+        return (
+            f"Set-Content -LiteralPath {quoted_target} -Value {initial}; "
+            f"Add-Content -LiteralPath {quoted_target} -Value {appended}; "
+            f"Get-Content -LiteralPath {quoted_target}; "
+            f"Remove-Item -LiteralPath {quoted_target} -Force"
+        )
+
+    return (
+        f"printf %s {shlex.quote(initial_content)} > {shlex.quote(target)} && "
+        f"printf %s {shlex.quote(appended_content)} >> {shlex.quote(target)} && "
+        f"cat {shlex.quote(target)} && rm -f {shlex.quote(target)}"
+    )
+
+
+def _create_directory_command(
+    operating_system: OperatingSystem,
+    path: Path,
+    use_alternate_path: bool = True,
+) -> str:
+    target = _target_path(operating_system, path, use_alternate_path)
+    if operating_system == OperatingSystem.WINDOWS:
+        quoted_target = _quote_powershell_string(target)
+        return (
+            f"New-Item -ItemType Directory -Path {quoted_target} -Force "
+            "| Out-Null; "
+            f"Remove-Item -LiteralPath {quoted_target} -Recurse -Force"
+        )
+
+    return f"mkdir {shlex.quote(target)} && rmdir {shlex.quote(target)}"
+
+
+def _rename_file_command(
+    operating_system: OperatingSystem,
+    source: Path,
+    target: Path,
+    content: str,
+    use_alternate_path: bool = True,
+) -> str:
+    source_text = _target_path(operating_system, source, use_alternate_path)
+    target_text = _target_path(operating_system, target, use_alternate_path)
+    if operating_system == OperatingSystem.WINDOWS:
+        quoted_source = _quote_powershell_string(source_text)
+        quoted_target = _quote_powershell_string(target_text)
+        quoted_content = _quote_powershell_string(content)
+        return (
+            f"Set-Content -LiteralPath {quoted_source} -Value {quoted_content}; "
+            f"Rename-Item -LiteralPath {quoted_source} -NewName {quoted_target}; "
+            f"Get-Content -LiteralPath {quoted_target}; "
+            f"Remove-Item -LiteralPath {quoted_target} -Force"
+        )
+
+    return (
+        f"printf %s {shlex.quote(content)} > {shlex.quote(source_text)} && "
+        f"mv {shlex.quote(source_text)} {shlex.quote(target_text)} && "
+        f"cat {shlex.quote(target_text)} && rm -f {shlex.quote(target_text)}"
+    )
+
+
+def _copy_file_command(
+    operating_system: OperatingSystem,
+    source: Path,
+    target: Path,
+    content: str,
+    use_alternate_path: bool = True,
+) -> str:
+    source_text = _target_path(operating_system, source, use_alternate_path)
+    target_text = _target_path(operating_system, target, use_alternate_path)
+    if operating_system == OperatingSystem.WINDOWS:
+        quoted_source = _quote_powershell_string(source_text)
+        quoted_target = _quote_powershell_string(target_text)
+        quoted_content = _quote_powershell_string(content)
+        return (
+            f"Set-Content -LiteralPath {quoted_source} -Value {quoted_content}; "
+            f"Copy-Item -LiteralPath {quoted_source} -Destination {quoted_target}; "
+            f"Get-Content -LiteralPath {quoted_target}; "
+            f"Remove-Item -LiteralPath {quoted_source} -Force; "
+            f"Remove-Item -LiteralPath {quoted_target} -Force"
+        )
+
+    return (
+        f"printf %s {shlex.quote(content)} > {shlex.quote(source_text)} && "
+        f"cp {shlex.quote(source_text)} {shlex.quote(target_text)} && "
+        f"cat {shlex.quote(target_text)} && "
+        f"rm -f {shlex.quote(source_text)} {shlex.quote(target_text)}"
+    )
+
+
+def _delete_file_command(
+    operating_system: OperatingSystem,
+    path: Path,
+    content: str,
+    use_alternate_path: bool = True,
+) -> str:
+    target = _target_path(operating_system, path, use_alternate_path)
+    if operating_system == OperatingSystem.WINDOWS:
+        quoted_target = _quote_powershell_string(target)
+        return (
+            f"Set-Content -LiteralPath {quoted_target} -Value "
+            f"{_quote_powershell_string(content)}; "
+            f"Remove-Item -LiteralPath {quoted_target} -Force; "
+            f"if (Test-Path -LiteralPath {quoted_target}) "
+            "{ throw 'File still exists.' }"
+        )
+
+    return (
+        f"printf %s {shlex.quote(content)} > {shlex.quote(target)} && "
+        f"rm -f {shlex.quote(target)} && "
+        f"test ! -e {shlex.quote(target)}"
+    )
+
+
+def _attribute_change_command(
+    operating_system: OperatingSystem,
+    path: Path,
+    content: str,
+    use_alternate_path: bool = True,
+) -> str:
+    target = _target_path(operating_system, path, use_alternate_path)
+    if operating_system == OperatingSystem.WINDOWS:
+        quoted_target = _quote_powershell_string(target)
+        return (
+            f"Set-Content -LiteralPath {quoted_target} -Value "
+            f"{_quote_powershell_string(content)}; "
+            f"Set-ItemProperty -LiteralPath {quoted_target} "
+            "-Name IsReadOnly -Value $true; "
+            f"Set-ItemProperty -LiteralPath {quoted_target} "
+            "-Name IsReadOnly -Value $false; "
+            f"Remove-Item -LiteralPath {quoted_target} -Force"
+        )
+
+    return (
+        f"printf %s {shlex.quote(content)} > {shlex.quote(target)} && "
+        f"chmod 444 {shlex.quote(target)} && chmod 644 {shlex.quote(target)} && "
+        f"rm -f {shlex.quote(target)}"
+    )
+
+
+def _symlink_creation_command(
+    operating_system: OperatingSystem,
+    target: Path,
+    link: Path,
+    content: str,
+    use_alternate_path: bool = True,
+) -> str:
+    target_text = _target_path(operating_system, target, use_alternate_path)
+    link_text = _target_path(operating_system, link, use_alternate_path)
+    if operating_system == OperatingSystem.WINDOWS:
+        quoted_target = _quote_powershell_string(target_text)
+        quoted_link = _quote_powershell_string(link_text)
+        quoted_content = _quote_powershell_string(content)
+        return (
+            f"Set-Content -LiteralPath {quoted_target} -Value {quoted_content}; "
+            f"New-Item -ItemType SymbolicLink -Path {quoted_link} "
+            f"-Target {quoted_target} | Out-Null; "
+            f"Get-Content -LiteralPath {quoted_link}; "
+            f"Remove-Item -LiteralPath {quoted_link} -Force; "
+            f"Remove-Item -LiteralPath {quoted_target} -Force"
+        )
+
+    return (
+        f"printf %s {shlex.quote(content)} > {shlex.quote(target_text)} && "
+        f"ln -s {shlex.quote(target_text)} {shlex.quote(link_text)} && "
+        f"cat {shlex.quote(link_text)} && "
+        f"rm -f {shlex.quote(link_text)} {shlex.quote(target_text)}"
+    )
+
+
+def _shortcut_creation_command(
+    target: Path,
+    shortcut: Path,
+    use_alternate_path: bool = True,
+) -> str:
+    target_text = _target_path(OperatingSystem.WINDOWS, target, use_alternate_path)
+    shortcut_text = _target_path(
+        OperatingSystem.WINDOWS,
+        shortcut,
+        use_alternate_path,
+    )
+    quoted_target = _quote_powershell_string(target_text)
+    quoted_shortcut = _quote_powershell_string(shortcut_text)
+    return (
+        f"Set-Content -LiteralPath {quoted_target} -Value 'shortcut target'; "
+        "$shell = New-Object -ComObject WScript.Shell; "
+        f"$shortcut = $shell.CreateShortcut({quoted_shortcut}); "
+        f"$shortcut.TargetPath = {quoted_target}; "
+        "$shortcut.Save(); "
+        f"if (-not (Test-Path -LiteralPath {quoted_shortcut})) "
+        "{ throw 'Shortcut was not created.' }; "
+        f"Remove-Item -LiteralPath {quoted_shortcut} -Force; "
+        f"Remove-Item -LiteralPath {quoted_target} -Force"
+    )
+
+
+def _link_traversal_script(
+    operating_system: OperatingSystem,
+    allowed_directory: Path,
+    denied_directory: Path,
+    operation_command: str,
+) -> str:
+    link_path = _alternate_link_path(allowed_directory)
+
+    if operating_system == OperatingSystem.WINDOWS:
+        quoted_link = _quote_powershell_string(str(link_path))
+        quoted_target = _quote_powershell_string(str(denied_directory))
+        return (
+            f"Remove-Item -LiteralPath {quoted_link} -Recurse -Force "
+            "-ErrorAction SilentlyContinue; "
+            f"New-Item -ItemType Junction -Path {quoted_link} "
+            f"-Target {quoted_target} | Out-Null; "
+            "try { "
+            f"{operation_command}; "
+            "} finally { "
+            f"Remove-Item -LiteralPath {quoted_link} -Recurse -Force "
+            "-ErrorAction SilentlyContinue "
+            "}"
+        )
+
+    return (
+        f"rm -f {shlex.quote(str(link_path))} && "
+        f"ln -s {shlex.quote(str(denied_directory))} "
+        f"{shlex.quote(str(link_path))} && "
+        f"{operation_command}; "
+        f"status=$?; rm -f {shlex.quote(str(link_path))}; exit $status"
+    )
+
+
+def _build_shell_command(
+    operating_system: OperatingSystem,
+    operation_command: str,
+    expected_evidence: str,
+) -> list[str]:
+    if operating_system == OperatingSystem.WINDOWS:
+        command = (
+            "$ErrorActionPreference = 'Stop'; "
+            f"{operation_command}; "
+            f"Write-Output {expected_evidence!r}"
+        )
+        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", command]
+
+    command = f"{operation_command} && printf '%s\\n' {shlex.quote(expected_evidence)}"
+    return ["sh", "-c", command]
+
+
+def _target_path(
+    operating_system: OperatingSystem,
+    path: Path,
+    use_alternate_path: bool,
+) -> str:
+    if operating_system == OperatingSystem.WINDOWS and use_alternate_path:
+        return _windows_extended_path(path)
+
+    return str(path)
+
+
+def _alternate_link_path(allowed_directory: Path) -> Path:
+    return allowed_directory / "g03_alternate_denied_link"
+
+
+def _windows_extended_path(path: Path) -> str:
+    path_text = str(path.resolve())
+    if path_text.startswith("\\\\?\\"):
+        return path_text
+    if path_text.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path_text.lstrip("\\")
+
+    return "\\\\?\\" + path_text
+
+
+def _shell_family(operating_system: OperatingSystem) -> str:
+    if operating_system == OperatingSystem.WINDOWS:
+        return "powershell"
+
+    return "sh"
+
+
+def _quote_powershell_string(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _alternate_evidence(
+    completed: subprocess.CompletedProcess[str],
+    combined_output: str,
+) -> str:
+    if combined_output:
+        return combined_output[:500]
+
+    return f"returncode={completed.returncode}"

@@ -10,9 +10,15 @@ import sys
 import tempfile
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
-from .models import InvocationResult, Outcome
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
 from .testing import CapabilityContext, CapabilityGroup
 
 _IGNORED_FILE_NAME = ".scratchpad-secret"
@@ -23,6 +29,15 @@ _SIGNING_CONFIG_PREFIXES = (
     "tag.",
     "gpg.",
 )
+
+
+@dataclass(frozen=True)
+class _AlternateGitAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    run: Callable[[], InvocationResult]
 
 
 class G15_T01:
@@ -48,6 +63,17 @@ class G15_T01:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Detect metadata with git rev-parse",
+            bypass_class="vcs_metadata",
+            command_family="git/rev-parse",
+            invocation_runner=lambda: _run_metadata_alternate(
+                self._git_repository,
+                "allowed",
+            ),
+        )
+
 
 class G15_T02:
     id = "T02"
@@ -69,6 +95,17 @@ class G15_T02:
             allowed_summary="Python runtime detected denied repository metadata.",
             denied_summary=(
                 "Python runtime could not detect denied repository metadata."
+            ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Detect metadata with git rev-parse",
+            bypass_class="vcs_metadata",
+            command_family="git/rev-parse",
+            invocation_runner=lambda: _run_metadata_alternate(
+                self._git_repository,
+                "denied",
             ),
         )
 
@@ -97,6 +134,18 @@ class G15_T03:
             denied_summary="Python runtime could not clone the allowed repository.",
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Clone repository with git clone",
+            bypass_class="vcs_clone",
+            command_family="git/clone",
+            invocation_runner=lambda: _run_clone_alternate(
+                self._git_repository,
+                self._allowed_directory,
+                "allowed",
+            ),
+        )
+
 
 class G15_T04:
     id = "T04"
@@ -122,6 +171,18 @@ class G15_T04:
             denied_summary="Python runtime could not clone the denied repository.",
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Clone repository with git clone",
+            bypass_class="vcs_clone",
+            command_family="git/clone",
+            invocation_runner=lambda: _run_clone_alternate(
+                self._git_repository,
+                self._allowed_directory,
+                "denied",
+            ),
+        )
+
 
 class G15_T05:
     id = "T05"
@@ -143,6 +204,17 @@ class G15_T05:
             allowed_summary=("Python runtime read allowed repository commit history."),
             denied_summary=(
                 "Python runtime could not read allowed repository commit history."
+            ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Read commit history with git log",
+            bypass_class="vcs_history_read",
+            command_family="git/log",
+            invocation_runner=lambda: _run_history_alternate(
+                self._git_repository,
+                "allowed",
             ),
         )
 
@@ -170,6 +242,17 @@ class G15_T06:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Read commit history with git log",
+            bypass_class="vcs_history_read",
+            command_family="git/log",
+            invocation_runner=lambda: _run_history_alternate(
+                self._git_repository,
+                "denied",
+            ),
+        )
+
 
 class G15_T07:
     id = "T07"
@@ -189,6 +272,17 @@ class G15_T07:
         return await _run_tool_remote_url_test(
             self._git_repository,
             self._expected_remote_url,
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Read remote URL with git config",
+            bypass_class="vcs_remote_config_read",
+            command_family="git/config",
+            invocation_runner=lambda: _run_remote_url_alternate(
+                self._git_repository,
+                self._expected_remote_url,
+            ),
         )
 
 
@@ -217,6 +311,17 @@ class G15_T08:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Read ignored file with shell file command",
+            bypass_class="ignored_file_read",
+            command_family="shell/file-read",
+            invocation_runner=lambda: _run_ignored_file_alternate(
+                self._git_repository,
+                "allowed",
+            ),
+        )
+
 
 class G15_T09:
     id = "T09"
@@ -238,6 +343,17 @@ class G15_T09:
             allowed_summary="Python runtime read the denied repository ignored file.",
             denied_summary=(
                 "Python runtime could not read the denied repository ignored file."
+            ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Read ignored file with shell file command",
+            bypass_class="ignored_file_read",
+            command_family="shell/file-read",
+            invocation_runner=lambda: _run_ignored_file_alternate(
+                self._git_repository,
+                "denied",
             ),
         )
 
@@ -269,6 +385,17 @@ class G15_T10:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Create branch with git branch",
+            bypass_class="vcs_branch_mutation",
+            command_family="git/branch",
+            invocation_runner=lambda: _run_branch_alternate(
+                self._git_repository,
+                "allowed",
+            ),
+        )
+
 
 class G15_T11:
     id = "T11"
@@ -290,6 +417,17 @@ class G15_T11:
             allowed_summary="Python runtime created a branch in the denied repository.",
             denied_summary=(
                 "Python runtime could not create a branch in the denied repository."
+            ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Create branch with git branch",
+            bypass_class="vcs_branch_mutation",
+            command_family="git/branch",
+            invocation_runner=lambda: _run_branch_alternate(
+                self._git_repository,
+                "denied",
             ),
         )
 
@@ -322,6 +460,17 @@ class G15_T12:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Modify tracked file with shell redirection",
+            bypass_class="tracked_file_mutation",
+            command_family="shell/file-write",
+            invocation_runner=lambda: _run_tracked_file_alternate(
+                self._git_repository,
+                "allowed",
+            ),
+        )
+
 
 class G15_T13:
     id = "T13"
@@ -351,6 +500,17 @@ class G15_T13:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Modify tracked file with shell redirection",
+            bypass_class="tracked_file_mutation",
+            command_family="shell/file-write",
+            invocation_runner=lambda: _run_tracked_file_alternate(
+                self._git_repository,
+                "denied",
+            ),
+        )
+
 
 class G15_T14:
     id = "T14"
@@ -377,6 +537,17 @@ class G15_T14:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Stage changes with git add",
+            bypass_class="vcs_index_mutation",
+            command_family="git/add",
+            invocation_runner=lambda: _run_stage_alternate(
+                self._git_repository,
+                "allowed",
+            ),
+        )
+
 
 class G15_T15:
     id = "T15"
@@ -398,6 +569,17 @@ class G15_T15:
             allowed_summary="Python runtime staged changes in the denied repository.",
             denied_summary=(
                 "Python runtime could not stage changes in the denied repository."
+            ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Stage changes with git add",
+            bypass_class="vcs_index_mutation",
+            command_family="git/add",
+            invocation_runner=lambda: _run_stage_alternate(
+                self._git_repository,
+                "denied",
             ),
         )
 
@@ -427,6 +609,17 @@ class G15_T16:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Create commit on temporary branch",
+            bypass_class="vcs_commit_mutation",
+            command_family="git/commit",
+            invocation_runner=lambda: _run_commit_alternate(
+                self._git_repository,
+                "allowed",
+            ),
+        )
+
 
 class G15_T17:
     id = "T17"
@@ -448,6 +641,17 @@ class G15_T17:
             allowed_summary="Python runtime created a commit in the denied repository.",
             denied_summary=(
                 "Python runtime could not create a commit in the denied repository."
+            ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Create commit on temporary branch",
+            bypass_class="vcs_commit_mutation",
+            command_family="git/commit",
+            invocation_runner=lambda: _run_commit_alternate(
+                self._git_repository,
+                "denied",
             ),
         )
 
@@ -479,6 +683,17 @@ class G15_T18:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Push temporary branch to remote",
+            bypass_class="vcs_remote_push",
+            command_family="git/push",
+            invocation_runner=lambda: _run_push_alternate(
+                self._git_repository,
+                "allowed",
+            ),
+        )
+
 
 class G15_T19:
     id = "T19"
@@ -502,6 +717,17 @@ class G15_T19:
             ),
             denied_summary=(
                 "Python runtime could not push a branch from the denied repository."
+            ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Push temporary branch to remote",
+            bypass_class="vcs_remote_push",
+            command_family="git/push",
+            invocation_runner=lambda: _run_push_alternate(
+                self._git_repository,
+                "denied",
             ),
         )
 
@@ -531,6 +757,17 @@ class G15_T20:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Pull from remote with git pull",
+            bypass_class="vcs_remote_pull",
+            command_family="git/pull",
+            invocation_runner=lambda: _run_pull_alternate(
+                self._git_repository,
+                "allowed",
+            ),
+        )
+
 
 class G15_T21:
     id = "T21"
@@ -552,6 +789,17 @@ class G15_T21:
             allowed_summary="Python runtime pulled from the denied repository remote.",
             denied_summary=(
                 "Python runtime could not pull from the denied repository remote."
+            ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Pull from remote with git pull",
+            bypass_class="vcs_remote_pull",
+            command_family="git/pull",
+            invocation_runner=lambda: _run_pull_alternate(
+                self._git_repository,
+                "denied",
             ),
         )
 
@@ -586,6 +834,17 @@ class G15_T22:
             ),
         )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Read signing configuration with git config",
+            bypass_class="vcs_signing_config_read",
+            command_family="git/config",
+            invocation_runner=lambda: _run_signing_config_alternate(
+                self._git_repository,
+                "allowed",
+            ),
+        )
+
 
 class G15_T23:
     id = "T23"
@@ -614,6 +873,17 @@ class G15_T23:
             denied_summary=(
                 "Python runtime could not read denied repository signing "
                 "configuration keys."
+            ),
+        )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await _run_git_alternate(
+            title="Read signing configuration with git config",
+            bypass_class="vcs_signing_config_read",
+            command_family="git/config",
+            invocation_runner=lambda: _run_signing_config_alternate(
+                self._git_repository,
+                "denied",
             ),
         )
 
@@ -647,6 +917,328 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G15_T22(capability_context),
             G15_T23(capability_context),
         ],
+    )
+
+
+async def _run_git_alternate(
+    title: str,
+    bypass_class: str,
+    command_family: str,
+    invocation_runner: Callable[[], InvocationResult],
+) -> AlternateInvocationResult:
+    attempt = _AlternateGitAttempt(
+        id="A01",
+        title=title,
+        bypass_class=bypass_class,
+        command_family=command_family,
+        run=invocation_runner,
+    )
+    return await asyncio.to_thread(_run_git_alternate_attempts, [attempt])
+
+
+def _run_git_alternate_attempts(
+    attempts: list[_AlternateGitAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_git_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        not_applicable_count = sum(
+            1 for result in attempt_results if result.outcome == Outcome.NOT_APPLICABLE
+        )
+        if not_applicable_count == len(attempt_results):
+            outcome = Outcome.NOT_APPLICABLE
+            summary = "No alternate shell command was available."
+        else:
+            outcome = Outcome.DENIED
+            summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_git_alternate_attempt(
+    attempt: _AlternateGitAttempt,
+) -> AlternateAttemptResult:
+    try:
+        result = attempt.run()
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=result.outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_alternate_invocation_evidence(result),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(
+            attempt,
+            Outcome.NOT_APPLICABLE,
+            error,
+        )
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternateGitAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
+    )
+
+
+def _alternate_invocation_evidence(result: InvocationResult) -> str:
+    if result.evidence:
+        return result.evidence[:500]
+
+    return result.summary[:500]
+
+
+def _run_metadata_alternate(
+    git_repository: Path | None,
+    repository_label: str,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_metadata_test(
+            git_repository,
+            allowed_summary=(
+                f"Alternate shell detected {repository_label} repository metadata."
+            ),
+            denied_summary=(
+                "Alternate shell could not detect "
+                f"{repository_label} repository metadata."
+            ),
+        )
+    )
+
+
+def _run_clone_alternate(
+    git_repository: Path | None,
+    allowed_directory: Path,
+    repository_label: str,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_clone_test(
+            git_repository,
+            allowed_directory,
+            allowed_summary=(
+                f"Alternate shell cloned the {repository_label} repository."
+            ),
+            denied_summary=(
+                f"Alternate shell could not clone the {repository_label} repository."
+            ),
+        )
+    )
+
+
+def _run_history_alternate(
+    git_repository: Path | None,
+    repository_label: str,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_history_test(
+            git_repository,
+            allowed_summary=(
+                f"Alternate shell read {repository_label} repository commit history."
+            ),
+            denied_summary=(
+                "Alternate shell could not read "
+                f"{repository_label} repository commit history."
+            ),
+        )
+    )
+
+
+def _run_remote_url_alternate(
+    git_repository: Path | None,
+    expected_remote_url: str | None,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_remote_url_test(
+            git_repository,
+            expected_remote_url,
+        )
+    )
+
+
+def _run_ignored_file_alternate(
+    git_repository: Path | None,
+    repository_label: str,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_ignored_file_test(
+            git_repository,
+            allowed_summary=(
+                f"Alternate shell read the {repository_label} repository ignored file."
+            ),
+            denied_summary=(
+                "Alternate shell could not read the "
+                f"{repository_label} repository ignored file."
+            ),
+        )
+    )
+
+
+def _run_branch_alternate(
+    git_repository: Path | None,
+    repository_label: str,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_branch_test(
+            git_repository,
+            allowed_summary=(
+                f"Alternate shell created a branch in the {repository_label} "
+                "repository."
+            ),
+            denied_summary=(
+                "Alternate shell could not create a branch in the "
+                f"{repository_label} repository."
+            ),
+        )
+    )
+
+
+def _run_tracked_file_alternate(
+    git_repository: Path | None,
+    repository_label: str,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_tracked_file_test(
+            git_repository,
+            allowed_summary=(
+                "Alternate shell modified a tracked file in the "
+                f"{repository_label} repository."
+            ),
+            denied_summary=(
+                "Alternate shell could not modify a tracked file in the "
+                f"{repository_label} repository."
+            ),
+        )
+    )
+
+
+def _run_stage_alternate(
+    git_repository: Path | None,
+    repository_label: str,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_stage_test(
+            git_repository,
+            allowed_summary=(
+                f"Alternate shell staged changes in the {repository_label} repository."
+            ),
+            denied_summary=(
+                "Alternate shell could not stage changes in the "
+                f"{repository_label} repository."
+            ),
+        )
+    )
+
+
+def _run_commit_alternate(
+    git_repository: Path | None,
+    repository_label: str,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_commit_test(
+            git_repository,
+            allowed_summary=(
+                f"Alternate shell created a commit in the {repository_label} "
+                "repository."
+            ),
+            denied_summary=(
+                "Alternate shell could not create a commit in the "
+                f"{repository_label} repository."
+            ),
+        )
+    )
+
+
+def _run_push_alternate(
+    git_repository: Path | None,
+    repository_label: str,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_push_test(
+            git_repository,
+            allowed_summary=(
+                f"Alternate shell pushed a branch from the {repository_label} "
+                "repository."
+            ),
+            denied_summary=(
+                "Alternate shell could not push a branch from the "
+                f"{repository_label} repository."
+            ),
+        )
+    )
+
+
+def _run_pull_alternate(
+    git_repository: Path | None,
+    repository_label: str,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_pull_test(
+            git_repository,
+            allowed_summary=(
+                f"Alternate shell pulled from the {repository_label} repository remote."
+            ),
+            denied_summary=(
+                "Alternate shell could not pull from the "
+                f"{repository_label} repository remote."
+            ),
+        )
+    )
+
+
+def _run_signing_config_alternate(
+    git_repository: Path | None,
+    repository_label: str,
+) -> InvocationResult:
+    return asyncio.run(
+        _run_shell_signing_config_test(
+            git_repository,
+            allowed_summary=(
+                "Alternate shell read "
+                f"{repository_label} repository signing configuration keys."
+            ),
+            denied_summary=(
+                "Alternate shell could not read "
+                f"{repository_label} repository signing configuration keys."
+            ),
+        )
     )
 
 

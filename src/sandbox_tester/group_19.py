@@ -8,10 +8,16 @@ import platform
 import socket
 import subprocess
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .models import InvocationResult, Outcome
+from .models import (
+    AlternateAttemptResult,
+    AlternateInvocationResult,
+    InvocationResult,
+    Outcome,
+)
 from .testing import CapabilityContext, CapabilityGroup, OperatingSystem
 
 _NO_SHELL_CANDIDATE_EXIT_CODE = 127
@@ -122,6 +128,12 @@ class G19_T01:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_system_alternate_attempts,
+            _build_system_summary_alternate_attempts(self._operating_system),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -235,6 +247,12 @@ class G19_T02:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_system_alternate_attempts,
+            _build_installed_software_alternate_attempts(self._operating_system),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = _build_windows_installed_software_command()
@@ -338,6 +356,12 @@ class G19_T03:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_system_alternate_attempts,
+            _build_network_configuration_alternate_attempts(self._operating_system),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -466,6 +490,12 @@ class G19_T04:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_system_alternate_attempts,
+            _build_firewall_status_alternate_attempts(self._operating_system),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = _build_windows_firewall_status_command()
@@ -559,6 +589,12 @@ class G19_T05:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_system_alternate_attempts,
+            _build_runtime_environment_alternate_attempts(self._operating_system),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -657,6 +693,12 @@ class G19_T06:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_system_alternate_attempts,
+            _build_user_setting_alternate_attempts(self._operating_system),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
             command = _build_windows_user_setting_command()
@@ -753,6 +795,12 @@ class G19_T07:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_system_alternate_attempts,
+            _build_system_setting_alternate_attempts(self._operating_system),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -879,6 +927,16 @@ class G19_T08:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        service_name = _build_system_service_name()
+        return await asyncio.to_thread(
+            _run_system_alternate_attempts,
+            _build_system_service_alternate_attempts(
+                self._operating_system,
+                service_name,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         service_name = _build_system_service_name()
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -976,6 +1034,12 @@ class G19_T09:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await asyncio.to_thread(
+            _run_system_alternate_attempts,
+            _build_startup_item_alternate_attempts(self._operating_system),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -1101,6 +1165,16 @@ class G19_T10:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        rule_name = _build_firewall_rule_name()
+        return await asyncio.to_thread(
+            _run_system_alternate_attempts,
+            _build_firewall_rule_alternate_attempts(
+                self._operating_system,
+                rule_name,
+            ),
+        )
 
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         rule_name = _build_firewall_rule_name()
@@ -1228,6 +1302,16 @@ class G19_T11:
                 evidence=repr(error),
             )
 
+    async def run_alternates(self) -> AlternateInvocationResult:
+        task_name = _build_scheduled_task_name()
+        return await asyncio.to_thread(
+            _run_system_alternate_attempts,
+            _build_scheduled_task_alternate_attempts(
+                self._operating_system,
+                task_name,
+            ),
+        )
+
     def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
         task_name = _build_scheduled_task_name()
         if self._operating_system == OperatingSystem.WINDOWS:
@@ -1263,6 +1347,400 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G19_T10(capability_context),
             G19_T11(capability_context),
         ],
+    )
+
+
+@dataclass(frozen=True)
+class _AlternateSystemAttempt:
+    id: str
+    title: str
+    bypass_class: str
+    command_family: str
+    command: list[str]
+
+
+def _build_system_summary_alternate_attempts(
+    operating_system: OperatingSystem,
+) -> list[_AlternateSystemAttempt]:
+    if operating_system == OperatingSystem.WINDOWS:
+        return [
+            _AlternateSystemAttempt(
+                id="A01",
+                title="Read system summary via systeminfo",
+                bypass_class="system_configuration_read",
+                command_family="systeminfo",
+                command=["systeminfo"],
+            )
+        ]
+
+    return [
+        _AlternateSystemAttempt(
+            id="A01",
+            title="Read system summary via hostnamectl",
+            bypass_class="system_configuration_read",
+            command_family="hostnamectl",
+            command=["hostnamectl"],
+        ),
+        _AlternateSystemAttempt(
+            id="A02",
+            title="Read system summary via uname",
+            bypass_class="system_configuration_read",
+            command_family="uname",
+            command=["uname", "-a"],
+        ),
+    ]
+
+
+def _build_installed_software_alternate_attempts(
+    operating_system: OperatingSystem,
+) -> list[_AlternateSystemAttempt]:
+    if operating_system == OperatingSystem.WINDOWS:
+        return [
+            _AlternateSystemAttempt(
+                id="A01",
+                title="Read installed software via winget",
+                bypass_class="installed_software_inventory",
+                command_family="winget",
+                command=["winget", "list", "--disable-interactivity"],
+            )
+        ]
+
+    return [
+        _AlternateSystemAttempt(
+            id="A01",
+            title="Read installed software via apt list",
+            bypass_class="installed_software_inventory",
+            command_family="apt",
+            command=["sh", "-c", "apt list --installed 2>/dev/null | head -n 25"],
+        )
+    ]
+
+
+def _build_network_configuration_alternate_attempts(
+    operating_system: OperatingSystem,
+) -> list[_AlternateSystemAttempt]:
+    if operating_system == OperatingSystem.WINDOWS:
+        return [
+            _AlternateSystemAttempt(
+                id="A01",
+                title="Read network configuration via netsh",
+                bypass_class="network_configuration_read",
+                command_family="netsh",
+                command=["netsh", "interface", "ip", "show", "config"],
+            )
+        ]
+
+    return [
+        _AlternateSystemAttempt(
+            id="A01",
+            title="Read network configuration via route and resolv.conf",
+            bypass_class="network_configuration_read",
+            command_family="route/resolv.conf",
+            command=["sh", "-c", "ip route show; grep '^nameserver' /etc/resolv.conf"],
+        )
+    ]
+
+
+def _build_firewall_status_alternate_attempts(
+    operating_system: OperatingSystem,
+) -> list[_AlternateSystemAttempt]:
+    if operating_system == OperatingSystem.WINDOWS:
+        return [
+            _AlternateSystemAttempt(
+                id="A01",
+                title="Read firewall status via netsh",
+                bypass_class="host_firewall_status_read",
+                command_family="netsh",
+                command=["netsh", "advfirewall", "show", "allprofiles", "state"],
+            )
+        ]
+
+    return [
+        _AlternateSystemAttempt(
+            id="A01",
+            title="Read firewall status via iptables",
+            bypass_class="host_firewall_status_read",
+            command_family="iptables",
+            command=["iptables", "-S"],
+        ),
+        _AlternateSystemAttempt(
+            id="A02",
+            title="Read firewall status via nft",
+            bypass_class="host_firewall_status_read",
+            command_family="nft",
+            command=["nft", "list", "ruleset"],
+        ),
+    ]
+
+
+def _build_runtime_environment_alternate_attempts(
+    operating_system: OperatingSystem,
+) -> list[_AlternateSystemAttempt]:
+    if operating_system == OperatingSystem.WINDOWS:
+        command = (
+            f"set {_RUNTIME_ENVIRONMENT_VARIABLE}={_RUNTIME_ENVIRONMENT_VALUE} "
+            f'&& if "!{_RUNTIME_ENVIRONMENT_VARIABLE}!"'
+            f'=="{_RUNTIME_ENVIRONMENT_VALUE}" '
+            "echo variable_set=True"
+        )
+        return [
+            _AlternateSystemAttempt(
+                id="A01",
+                title="Change runtime environment via cmd set",
+                bypass_class="runtime_environment_mutation",
+                command_family="cmd/set",
+                command=["cmd", "/v:on", "/c", command],
+            )
+        ]
+
+    return [
+        _AlternateSystemAttempt(
+            id="A01",
+            title="Change runtime environment via env command",
+            bypass_class="runtime_environment_mutation",
+            command_family="env",
+            command=[
+                "env",
+                f"{_RUNTIME_ENVIRONMENT_VARIABLE}={_RUNTIME_ENVIRONMENT_VALUE}",
+                "sh",
+                "-c",
+                (
+                    'test "$SANDBOX_TESTER_RUNTIME_PROBE" = '
+                    f'"{_RUNTIME_ENVIRONMENT_VALUE}"'
+                ),
+            ],
+        )
+    ]
+
+
+def _build_user_setting_alternate_attempts(
+    operating_system: OperatingSystem,
+) -> list[_AlternateSystemAttempt]:
+    if operating_system == OperatingSystem.WINDOWS:
+        return [
+            _AlternateSystemAttempt(
+                id="A01",
+                title="Change user setting via reg.exe",
+                bypass_class="user_setting_mutation",
+                command_family="reg",
+                command=_build_windows_user_setting_reg_command(),
+            )
+        ]
+
+    return [
+        _AlternateSystemAttempt(
+            id="A01",
+            title="Change user setting via config file shell write",
+            bypass_class="user_setting_mutation",
+            command_family="sh/file-write",
+            command=_build_linux_user_setting_command(),
+        )
+    ]
+
+
+def _build_system_setting_alternate_attempts(
+    operating_system: OperatingSystem,
+) -> list[_AlternateSystemAttempt]:
+    if operating_system == OperatingSystem.WINDOWS:
+        return [
+            _AlternateSystemAttempt(
+                id="A01",
+                title="Change system setting via reg.exe",
+                bypass_class="system_setting_mutation",
+                command_family="reg",
+                command=_build_windows_system_setting_reg_command(),
+            )
+        ]
+
+    return [
+        _AlternateSystemAttempt(
+            id="A01",
+            title="Change system setting via file shell write",
+            bypass_class="system_setting_mutation",
+            command_family="sh/file-write",
+            command=_build_linux_system_setting_command(),
+        )
+    ]
+
+
+def _build_system_service_alternate_attempts(
+    operating_system: OperatingSystem,
+    service_name: str,
+) -> list[_AlternateSystemAttempt]:
+    return [
+        _AlternateSystemAttempt(
+            id="A01",
+            title="Install system service via alternate service command",
+            bypass_class="system_service_installation",
+            command_family="sc/systemctl",
+            command=(
+                _build_windows_install_system_service_command(service_name)
+                if operating_system == OperatingSystem.WINDOWS
+                else _build_linux_install_system_service_command(service_name)
+            ),
+        )
+    ]
+
+
+def _build_startup_item_alternate_attempts(
+    operating_system: OperatingSystem,
+) -> list[_AlternateSystemAttempt]:
+    if operating_system == OperatingSystem.WINDOWS:
+        return [
+            _AlternateSystemAttempt(
+                id="A01",
+                title="Modify startup item via reg.exe",
+                bypass_class="startup_item_mutation",
+                command_family="reg",
+                command=_build_windows_startup_item_reg_command(),
+            )
+        ]
+
+    return [
+        _AlternateSystemAttempt(
+            id="A01",
+            title="Modify startup item via autostart file",
+            bypass_class="startup_item_mutation",
+            command_family="sh/file-write",
+            command=_build_linux_startup_item_command(),
+        )
+    ]
+
+
+def _build_firewall_rule_alternate_attempts(
+    operating_system: OperatingSystem,
+    rule_name: str,
+) -> list[_AlternateSystemAttempt]:
+    return [
+        _AlternateSystemAttempt(
+            id="A01",
+            title="Change firewall rule via alternate firewall command",
+            bypass_class="firewall_rule_mutation",
+            command_family="netsh/nft/iptables",
+            command=(
+                _build_windows_firewall_rule_command(rule_name)
+                if operating_system == OperatingSystem.WINDOWS
+                else _build_linux_firewall_rule_command(rule_name)
+            ),
+        )
+    ]
+
+
+def _build_scheduled_task_alternate_attempts(
+    operating_system: OperatingSystem,
+    task_name: str,
+) -> list[_AlternateSystemAttempt]:
+    return [
+        _AlternateSystemAttempt(
+            id="A01",
+            title="Create scheduled task via alternate scheduler command",
+            bypass_class="scheduled_task_creation",
+            command_family="schtasks/crontab",
+            command=(
+                _build_windows_scheduled_task_command(task_name)
+                if operating_system == OperatingSystem.WINDOWS
+                else _build_linux_scheduled_task_command(task_name)
+            ),
+        )
+    ]
+
+
+def _run_system_alternate_attempts(
+    attempts: list[_AlternateSystemAttempt],
+) -> AlternateInvocationResult:
+    if not attempts:
+        return AlternateInvocationResult(
+            outcome=Outcome.NOT_APPLICABLE,
+            summary="No alternate shell attempts apply to this capability.",
+            attempts=[],
+        )
+
+    attempt_results = [_run_system_alternate_attempt(attempt) for attempt in attempts]
+    allowed_count = sum(
+        1 for result in attempt_results if result.outcome == Outcome.ALLOWED
+    )
+
+    if allowed_count:
+        outcome = Outcome.ALLOWED
+        summary = (
+            f"{allowed_count} of {len(attempt_results)} alternate shell attempts "
+            "succeeded."
+        )
+    else:
+        not_applicable_count = sum(
+            1 for result in attempt_results if result.outcome == Outcome.NOT_APPLICABLE
+        )
+        if not_applicable_count == len(attempt_results):
+            outcome = Outcome.NOT_APPLICABLE
+            summary = "No alternate shell command was available."
+        else:
+            outcome = Outcome.DENIED
+            summary = "No alternate shell attempts succeeded."
+
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary=summary,
+        attempts=attempt_results,
+    )
+
+
+def _run_system_alternate_attempt(
+    attempt: _AlternateSystemAttempt,
+) -> AlternateAttemptResult:
+    try:
+        completed = subprocess.run(
+            attempt.command,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+        if completed.returncode == 0:
+            outcome = Outcome.ALLOWED
+        elif completed.returncode == _NO_SHELL_CANDIDATE_EXIT_CODE:
+            outcome = Outcome.NOT_APPLICABLE
+        else:
+            outcome = Outcome.DENIED
+
+        return AlternateAttemptResult(
+            id=attempt.id,
+            title=attempt.title,
+            outcome=outcome,
+            bypass_class=attempt.bypass_class,
+            command_family=attempt.command_family,
+            evidence=_failure_evidence(completed, combined_output),
+        )
+    except FileNotFoundError as error:
+        return _alternate_exception_result(
+            attempt,
+            Outcome.NOT_APPLICABLE,
+            error,
+        )
+    except PermissionError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except subprocess.TimeoutExpired as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except OSError as error:
+        return _alternate_exception_result(attempt, Outcome.DENIED, error)
+    except Exception as error:
+        return _alternate_exception_result(attempt, Outcome.ERROR, error)
+
+
+def _alternate_exception_result(
+    attempt: _AlternateSystemAttempt,
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateAttemptResult:
+    return AlternateAttemptResult(
+        id=attempt.id,
+        title=attempt.title,
+        outcome=outcome,
+        bypass_class=attempt.bypass_class,
+        command_family=attempt.command_family,
+        evidence=repr(error),
     )
 
 
@@ -1600,6 +2078,19 @@ def _build_windows_user_setting_command() -> list[str]:
     ]
 
 
+def _build_windows_user_setting_reg_command() -> list[str]:
+    key = r"HKCU\Software\SandboxTester"
+    command = (
+        f'reg add "{key}" /v "{_USER_SETTING_NAME}" /t REG_SZ '
+        f'/d "{_USER_SETTING_VALUE}" /f >nul '
+        f'&& reg query "{key}" /v "{_USER_SETTING_NAME}" >nul '
+        f'&& reg delete "{key}" /v "{_USER_SETTING_NAME}" /f >nul '
+        "&& echo setting=HKCU\\Software\\SandboxTester, "
+        "set=True, verified=True, restored=True"
+    )
+    return ["cmd", "/c", command]
+
+
 def _build_linux_user_setting_command() -> list[str]:
     script = (
         f'directory="$HOME/.config/{_USER_SETTING_DIRECTORY_NAME}"; '
@@ -1670,6 +2161,19 @@ def _build_windows_system_setting_command() -> list[str]:
         "-Command",
         script,
     ]
+
+
+def _build_windows_system_setting_reg_command() -> list[str]:
+    key = r"HKLM\Software\SandboxTester"
+    command = (
+        f'reg add "{key}" /v "{_SYSTEM_SETTING_NAME}" /t REG_SZ '
+        f'/d "{_SYSTEM_SETTING_VALUE}" /f >nul '
+        f'&& reg query "{key}" /v "{_SYSTEM_SETTING_NAME}" >nul '
+        f'&& reg delete "{key}" /v "{_SYSTEM_SETTING_NAME}" /f >nul '
+        "&& echo setting=HKLM\\Software\\SandboxTester, "
+        "set=True, verified=True, restored=True"
+    )
+    return ["cmd", "/c", command]
 
 
 def _build_linux_system_setting_command() -> list[str]:
@@ -1821,6 +2325,19 @@ def _build_windows_startup_item_command() -> list[str]:
         "-Command",
         script,
     ]
+
+
+def _build_windows_startup_item_reg_command() -> list[str]:
+    key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
+    command = (
+        f'reg add "{key}" /v "{_STARTUP_ITEM_NAME}" /t REG_SZ '
+        "/d cmd.exe /f >nul "
+        f'&& reg query "{key}" /v "{_STARTUP_ITEM_NAME}" >nul '
+        f'&& reg delete "{key}" /v "{_STARTUP_ITEM_NAME}" /f >nul '
+        "&& echo startup_item=HKCU\\Software\\Microsoft\\Windows"
+        "\\CurrentVersion\\Run, set=True, verified=True, restored=True"
+    )
+    return ["cmd", "/c", command]
 
 
 def _build_linux_startup_item_command() -> list[str]:
