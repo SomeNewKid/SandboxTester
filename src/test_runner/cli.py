@@ -3,21 +3,26 @@
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import datetime as dt
 import json
 import os
+import shutil
 from pathlib import Path
 
-from sandbox_tester.manager import run_all_groups
-from sandbox_tester.models import CapabilityGroupResult
-from sandbox_tester.reporter import ConsoleReporter, QuietReporter
+from sandbox_tester.reporter import (
+    CompositeReporter,
+    ConsoleReporter,
+    QuietReporter,
+    StatusFileReporter,
+)
+from sandbox_tester.runner import run_from_files
 from sandbox_tester.testing import (
     CapabilityContext,
     create_allowed_directory,
     create_disallowed_directory,
     delete_allowed_directory,
     delete_denied_directory,
+    write_capability_context,
 )
 from sandbox_tester.utilities import render_markdown_report
 
@@ -60,6 +65,11 @@ ALLOW_MICROPHONE_CAPTURE = True
 
 def main() -> int:
     """Run the command-line interface."""
+    run_directory = _create_run_directory(Path.cwd())
+    input_directory = run_directory / "input"
+    output_directory = run_directory / "output"
+    context_path = input_directory / "capability-context.json"
+    status_path = output_directory / "status.ndjson"
     allowed_directory = create_allowed_directory()
     denied_directory = create_disallowed_directory()
     capability_context = CapabilityContext.from_current_environment(
@@ -96,11 +106,25 @@ def main() -> int:
         allow_camera_capture=ALLOW_CAMERA_CAPTURE,
         allow_microphone_capture=ALLOW_MICROPHONE_CAPTURE,
     )
+    write_capability_context(capability_context, context_path)
 
-    reporter = ConsoleReporter() if VERBOSE_LOGGING else QuietReporter()
-    results = asyncio.run(run_all_groups(capability_context, reporter))
+    console_reporter = ConsoleReporter() if VERBOSE_LOGGING else QuietReporter()
+    reporter = CompositeReporter(
+        [
+            console_reporter,
+            StatusFileReporter(status_path),
+        ]
+    )
+
+    results = asyncio.run(run_from_files(context_path, output_directory, reporter))
+    run_report_path = output_directory / "report.json"
+    done_path = output_directory / "done.json"
+
+    if not done_path.exists():
+        raise RuntimeError(f"Sandbox tester did not write completion file: {done_path}")
+
     if SAVE_REPORT_TO_JSON:
-        report_path = _save_report_to_json(Path.cwd(), results)
+        report_path = _save_report_to_json(Path.cwd(), run_report_path)
         print(f"JSON report saved to: {report_path}")
 
     if results:
@@ -118,22 +142,39 @@ def main() -> int:
     if DELETE_SCRATCH_DIRECTORIES:
         delete_allowed_directory(allowed_directory)
         delete_denied_directory(denied_directory)
+        _delete_run_directory(run_directory)
     else:
         print(f"Allowed directory retained at: {allowed_directory}")
         print(f"Denied directory retained at: {denied_directory}")
+        print(f"Run directory retained at: {run_directory}")
     return 0
+
+
+def _create_run_directory(working_directory: Path) -> Path:
+    runs_directory = working_directory / ".runs"
+    runs_directory.mkdir(parents=True, exist_ok=True)
+
+    timestamp = dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    run_directory = runs_directory / f"run-{timestamp}"
+    run_directory.mkdir()
+    return run_directory
+
+
+def _delete_run_directory(run_directory: Path) -> None:
+    if run_directory.exists():
+        shutil.rmtree(run_directory, ignore_errors=True)
 
 
 def _save_report_to_json(
     working_directory: Path,
-    results: list[CapabilityGroupResult],
+    source_report_path: Path,
 ) -> Path:
     reports_directory = working_directory / ".reports"
     reports_directory.mkdir(parents=True, exist_ok=True)
 
     timestamp = dt.datetime.now().strftime("%Y-%m-%d-%H-%M")
     report_path = reports_directory / f"report-{timestamp}.json"
-    report_data = [dataclasses.asdict(result) for result in results]
+    report_data = json.loads(source_report_path.read_text(encoding="utf-8"))
     report_json = json.dumps(report_data, indent=2)
     report_path.write_text(f"{report_json}\n", encoding="utf-8")
 
