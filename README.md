@@ -2,9 +2,9 @@
 
 Sandbox Tester is a Python command-line workbench for testing what an AI agent
 runtime can do inside its current execution environment. It probes filesystem,
-process, network, tool, identity, desktop, browser, cloud, and policy
-capabilities, then prints a Markdown report showing whether each capability was
-allowed, denied, not applicable, or errored.
+process, network, tool, identity, desktop, browser, cloud, credential, hardware,
+scheduling, and logging capabilities, then writes structured output showing
+whether each capability was allowed, denied, not applicable, or errored.
 
 > [!WARNING]
 > This is an experimental project and should not be considered production-ready.
@@ -16,15 +16,18 @@ dispute what the sandbox actually permits.
 
 ## What It Does
 
-The CLI prepares a controlled allowed workspace, builds a capability context for
-the current deployment, runs every capability group, and prints a report.
+The CLI prepares controlled test fixtures, builds a capability context for the
+current deployment, runs every capability group, writes run artifacts, saves a
+JSON report, and optionally prints a Markdown report.
 
-Each capability is tested through two invocation paths:
+Each capability is tested through three invocation paths:
 
 - shell invocation, where the capability is attempted through a local command
 - tool invocation, where the capability is attempted through Python/tool code
+- alternate shell invocation, where related shell approaches probe for bypasses
+  around simple policy guards
 
-The result for each path is classified as:
+The result for each invocation path is classified as:
 
 - `Allowed`: the action succeeded
 - `Denied`: the action appears to have been blocked
@@ -42,15 +45,14 @@ The capability groups cover:
 - inter-process communication
 - desktop UI and browser session access
 - package, source control, database, cloud, and credential access
-- system administration, hardware, scheduling, logging, model/tool, messaging,
-  destructive action, and approval-policy capabilities
+- system administration, hardware, scheduling, and logging capabilities
+
+The current implementation registers groups G01 through G22.
 
 ## Requirements
 
 - Python 3.11.
 - PowerShell on Windows.
-- An `OPENAI_API_KEY` environment variable for agent-mediated OpenAI model
-  checks.
 - Any deployment-specific test resources configured in `src/test_runner/cli.py`,
   such as a mounted/shared directory.
 
@@ -74,22 +76,54 @@ Run the sandbox tester from the repository root:
 .\.venv\Scripts\python.exe -m test_runner
 ```
 
-The command prints a Markdown report such as:
+The command creates a timestamped run directory under `.runs`, writes live and
+final output files, copies the JSON report to `.reports`, and prints a Markdown
+summary when enabled in `src/test_runner/cli.py`.
+
+The file protocol for each run is:
+
+```text
+.runs/run-YYYY-mm-dd-HH-MM-SS/
+  input/
+    capability-context.json
+  output/
+    status.ndjson
+    report.json
+    done.json
+```
+
+The Markdown output looks like:
 
 ```text
 # Sandbox Report
 
 ## G02. Basic filesystem read access
 
-| Shell | Tool | ID | Title |
-| --- | --- | --- | --- |
-| Allowed | Allowed | T01 | Read a known allowed test file |
-| Allowed | Allowed | T02 | List current directory |
+| Shell | Tool | Alternate Shell | ID | Title |
+| --- | --- | --- | --- | --- |
+| Allowed | Allowed | N/A | T01 | Read a known allowed test file |
+| Allowed | Allowed | N/A | T02 | List current directory |
 ```
 
-The test runner creates a allowed directory before the run. Depending on the
-configuration in `src/test_runner/cli.py`, that directory can either be deleted
-after the run or retained for inspection.
+The test runner creates allowed and denied fixture directories before the run.
+Depending on the configuration in `src/test_runner/cli.py`, scratch directories
+and run artifacts can either be deleted after the run or retained for inspection.
+
+## Architecture
+
+The project is split into two packages:
+
+- `sandbox_tester`: the sandbox-side test engine. It owns the capability
+  context model, result models, reporters, capability group registration,
+  individual probes, file-based runner, and Markdown rendering.
+- `test_runner`: the host-side orchestration harness. It prepares directories,
+  builds and serializes the capability context, invokes the tester, copies the
+  final report, and handles cleanup.
+
+The current runner still invokes `sandbox_tester` locally as the current user.
+The file-based boundary between `test_runner` and `sandbox_tester` is intended
+to support future launchers where a privileged orchestrator prepares fixtures
+and a lower-privilege sandbox identity runs the tester.
 
 ## Configuration
 
@@ -97,8 +131,10 @@ Runtime configuration is currently centralized in `src/test_runner/cli.py`.
 This includes:
 
 - verbose versus quiet progress reporting
-- whether the allowed directory is deleted after a run
+- whether scratch directories and run artifacts are deleted after a run
 - the mounted/shared directory used by mounted-storage probes
+- allowed and denied targets for network, local service, database, browser,
+  source control, hardware, and credential-related probes
 
 The sandbox engine receives this deployment-specific information through
 `CapabilityContext`, so capability tests do not need to discover global paths on
@@ -124,13 +160,14 @@ This runs:
 ```text
 src/sandbox_tester/
   models.py       Shared result dataclasses and outcome enum
-  testing.py      Capability context, allowed directory setup, protocols, and group runner
-  reporter.py     Console and quiet progress reporters
+  testing.py      Capability context, fixture setup, protocols, and group runner
+  runner.py       File-based entry point for serialized test runs
+  reporter.py     Console, quiet, status-file, and composite reporters
   manager.py      Ordered capability group registration and execution
   utilities.py    Markdown report rendering
   group_01.py     Runtime identity and execution context tests
   ...
-  group_26.py     Policy and approval enforcement tests
+  group_22.py     Logging, telemetry, and audit visibility tests
 
 src/test_runner/
   __main__.py     Package entry point for python -m test_runner
@@ -143,10 +180,6 @@ scripts/
   setup-dev.ps1
   check.ps1
 ```
-
-`Proposed tests.md` contains the working catalogue of capability groups and test
-IDs. The implemented group and test identifiers are intended to match that
-catalogue.
 
 ## Notes
 
