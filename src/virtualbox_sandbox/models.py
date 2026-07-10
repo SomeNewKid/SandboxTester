@@ -83,6 +83,7 @@ class GuestRunLayout:
     denied_directory: str
     output_directory: str
     config_path: str
+    config_json: str
 
 
 @dataclass(frozen=True)

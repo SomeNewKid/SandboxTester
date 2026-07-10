@@ -303,6 +303,7 @@ def _setup_clone_if_started(
         source_directory=source_directory,
         agent_name=agent_name,
         agent_verbose=agent_verbose,
+        local_run_directory=result.run_directory,
     )
 
     try:

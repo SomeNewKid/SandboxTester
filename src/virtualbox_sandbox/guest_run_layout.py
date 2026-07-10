@@ -17,6 +17,14 @@ _ALLOWED_FILE_CONTENT = "This is a test file for the allowed directory."
 _DENIED_FILE_CONTENT = "This is a test file for the denied directory."
 _RUNTIME_TEMP_DIRECTORY = "/tmp"
 _OPERATING_SYSTEM = "Linux"
+_ALLOWED_DOMAIN = "example.com"
+_DENIED_DOMAIN = "example.net"
+_DENIED_INTRANET_TARGET = "192.168.86.28"
+_DNS_EXFILTRATION_DOMAIN = "c2FuZGJveC10ZXN0ZXI.example.com"
+_HTTP_EXFILTRATION_DOMAIN = "example.com"
+_HTTP_EXFILTRATION_HEADER = "exfiltration=example"
+_WEBSOCKET_EXFILTRATION_URL = "wss://echo.websocket.org"
+_GIT_REMOTE_URL = "https://github.com/SomeNewKid/ScratchpadOne.git"
 
 
 def create_sandbox_tester_run_layout(
@@ -29,6 +37,13 @@ def create_sandbox_tester_run_layout(
     denied_directory = posixpath.join(run_directory, "denied")
     output_directory = posixpath.join(run_directory, "output")
     config_path = posixpath.join(run_directory, "config.json")
+    config_json = _build_config_json(
+        run_directory=run_directory,
+        allowed_directory=allowed_directory,
+        denied_directory=denied_directory,
+        output_directory=output_directory,
+        username=username,
+    )
 
     layout = GuestRunLayout(
         run_directory=run_directory,
@@ -36,6 +51,7 @@ def create_sandbox_tester_run_layout(
         denied_directory=denied_directory,
         output_directory=output_directory,
         config_path=config_path,
+        config_json=config_json,
     )
 
     with client.open_sftp() as sftp:
@@ -52,38 +68,44 @@ def create_sandbox_tester_run_layout(
             posixpath.join(denied_directory, _DENIED_FILE_NAME),
             _DENIED_FILE_CONTENT,
         )
-        _write_remote_text(sftp, config_path, _build_config_json(layout, username))
+        _write_remote_text(sftp, config_path, layout.config_json)
 
     return layout
 
 
-def _build_config_json(layout: GuestRunLayout, username: str) -> str:
+def _build_config_json(
+    run_directory: str,
+    allowed_directory: str,
+    denied_directory: str,
+    output_directory: str,
+    username: str,
+) -> str:
     config = {
-        "working_directory": layout.run_directory,
-        "allowed_directory": layout.allowed_directory,
-        "denied_directory": layout.denied_directory,
+        "working_directory": run_directory,
+        "allowed_directory": allowed_directory,
+        "denied_directory": denied_directory,
         "runtime_user_directory": _build_runtime_user_directory(username),
         "runtime_temp_directory": _RUNTIME_TEMP_DIRECTORY,
         "mounted_shared_directory": None,
         "operating_system": _OPERATING_SYSTEM,
-        "allowed_domain": None,
-        "denied_domain": None,
+        "allowed_domain": _ALLOWED_DOMAIN,
+        "denied_domain": _DENIED_DOMAIN,
         "allowed_local_address": None,
         "denied_local_address": None,
         "allowed_localnet_address": None,
         "denied_localnet_address": None,
         "allowed_intranet_target": None,
-        "denied_intranet_target": None,
+        "denied_intranet_target": _DENIED_INTRANET_TARGET,
         "allowed_database_address": None,
         "denied_database_address": None,
         "container_runtime_socket": None,
         "local_dev_server_url": None,
         "local_model_server_url": None,
         "metadata_endpoint_url": None,
-        "dns_exfiltration_domain": None,
-        "http_exfiltration_domain": None,
-        "http_exfiltration_header": None,
-        "websocket_exfiltration_url": None,
+        "dns_exfiltration_domain": _DNS_EXFILTRATION_DOMAIN,
+        "http_exfiltration_domain": _HTTP_EXFILTRATION_DOMAIN,
+        "http_exfiltration_header": _HTTP_EXFILTRATION_HEADER,
+        "websocket_exfiltration_url": _WEBSOCKET_EXFILTRATION_URL,
         "smtp_exfiltration_url": None,
         "ssh_agent_socket": None,
         "browser_debugging_url": None,
@@ -91,10 +113,10 @@ def _build_config_json(layout: GuestRunLayout, username: str) -> str:
         "existing_browser_profile": None,
         "allowed_git_repository": None,
         "denied_git_repository": None,
-        "git_remote_url": None,
-        "allow_camera_capture": False,
-        "allow_microphone_capture": False,
-        "output_directory": layout.output_directory,
+        "git_remote_url": _GIT_REMOTE_URL,
+        "allow_camera_capture": True,
+        "allow_microphone_capture": True,
+        "output_directory": output_directory,
     }
     return f"{json.dumps(config, indent=2)}\n"
 

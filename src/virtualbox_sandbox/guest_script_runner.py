@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import posixpath
 import shlex
+import sys
+import time
 import uuid
 from fnmatch import fnmatch
 from pathlib import Path
@@ -17,6 +19,8 @@ _REMOTE_SCRIPT_DIRECTORY = "/tmp"
 _REMOTE_SOURCE_DIRECTORY = "/tmp"
 _REMOTE_AGENT_DIRECTORY = "/tmp"
 _REMOTE_VENV_DIRECTORY = "/tmp"
+_REMOTE_OUTPUT_POLL_INTERVAL_SECONDS = 0.1
+_REMOTE_OUTPUT_CHUNK_SIZE = 4096
 
 
 class GuestScriptRunner:
@@ -170,17 +174,14 @@ class GuestScriptRunner:
             python_executable,
             environment_variables,
         )
-        _, stdout, stderr = self._client.exec_command(command)
-        exit_code = stdout.channel.recv_exit_status()
-        stdout_text = stdout.read().decode("utf-8", errors="replace").strip()
-        stderr_text = stderr.read().decode("utf-8", errors="replace").strip()
+        completed = _run_remote_command_and_stream(self._client, command)
         return GuestScriptResult(
             script_path=script_path,
             source_path=source_path,
             command=command,
-            exit_code=exit_code,
-            stdout=stdout_text,
-            stderr=stderr_text,
+            exit_code=completed.exit_code,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
         )
 
     def _create_virtual_environment(self, venv_path: str) -> None:
@@ -289,14 +290,70 @@ def _create_environment_prefix(
 
 
 def _run_remote_command(client: paramiko.SSHClient, command: str) -> None:
-    _, stdout, stderr = client.exec_command(command)
-    exit_code = stdout.channel.recv_exit_status()
-    stdout_text = stdout.read().decode("utf-8", errors="replace").strip()
-    stderr_text = stderr.read().decode("utf-8", errors="replace").strip()
+    completed = _run_remote_command_and_stream(client, command)
 
-    if exit_code != 0:
+    if completed.exit_code != 0:
         raise RuntimeError(
-            f"Remote command failed with exit code {exit_code}: {command}\n"
-            f"stdout:\n{stdout_text}\n"
-            f"stderr:\n{stderr_text}"
+            f"Remote command failed with exit code {completed.exit_code}: {command}\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
         )
+
+
+def _run_remote_command_and_stream(
+    client: paramiko.SSHClient,
+    command: str,
+) -> _RemoteCommandResult:
+    _, stdout, stderr = client.exec_command(command)
+    channel = stdout.channel
+    stdout_chunks: list[bytes] = []
+    stderr_chunks: list[bytes] = []
+
+    while True:
+        made_progress = False
+
+        while channel.recv_ready():
+            chunk = channel.recv(_REMOTE_OUTPUT_CHUNK_SIZE)
+            stdout_chunks.append(chunk)
+            _write_stream_chunk(sys.stdout, chunk)
+            made_progress = True
+
+        while channel.recv_stderr_ready():
+            chunk = channel.recv_stderr(_REMOTE_OUTPUT_CHUNK_SIZE)
+            stderr_chunks.append(chunk)
+            _write_stream_chunk(sys.stderr, chunk)
+            made_progress = True
+
+        if channel.exit_status_ready():
+            if not channel.recv_ready() and not channel.recv_stderr_ready():
+                break
+
+        if not made_progress:
+            time.sleep(_REMOTE_OUTPUT_POLL_INTERVAL_SECONDS)
+
+    exit_code = channel.recv_exit_status()
+    stdout.close()
+    stderr.close()
+
+    return _RemoteCommandResult(
+        exit_code=exit_code,
+        stdout=_decode_output(stdout_chunks).strip(),
+        stderr=_decode_output(stderr_chunks).strip(),
+    )
+
+
+def _write_stream_chunk(stream: object, chunk: bytes) -> None:
+    text = chunk.decode("utf-8", errors="replace")
+    stream.write(text)  # type: ignore[attr-defined]
+    stream.flush()  # type: ignore[attr-defined]
+
+
+def _decode_output(chunks: list[bytes]) -> str:
+    return b"".join(chunks).decode("utf-8", errors="replace")
+
+
+class _RemoteCommandResult:
+    def __init__(self, exit_code: int, stdout: str, stderr: str) -> None:
+        self.exit_code = exit_code
+        self.stdout = stdout
+        self.stderr = stderr

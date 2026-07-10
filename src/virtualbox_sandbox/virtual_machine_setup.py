@@ -55,6 +55,7 @@ class VirtualMachineSetup:
         source_directory: Path | None = None,
         agent_name: str | None = None,
         agent_verbose: bool = False,
+        local_run_directory: Path | None = None,
     ) -> None:
         self._vm_name = vm_name
         self._ssh_target = _SshTarget(
@@ -67,6 +68,7 @@ class VirtualMachineSetup:
         self._source_directory = source_directory
         self._agent_name = agent_name
         self._agent_verbose = agent_verbose
+        self._local_run_directory = local_run_directory
         self._guest_run_layout: GuestRunLayout | None = None
 
     def setup(self) -> GuestScriptResult:
@@ -102,6 +104,7 @@ class VirtualMachineSetup:
             self._ssh_target.username,
         )
         self._guest_run_layout = layout
+        self._write_local_config(layout)
         environment_variables = {
             "SANDBOX_TESTER_CONFIG_PATH": layout.config_path,
         }
@@ -110,6 +113,14 @@ class VirtualMachineSetup:
             environment_variables["SANDBOX_TESTER_VERBOSE"] = "1"
 
         return environment_variables
+
+    def _write_local_config(self, layout: GuestRunLayout) -> None:
+        if self._local_run_directory is None:
+            return
+
+        self._local_run_directory.mkdir(parents=True, exist_ok=True)
+        config_path = self._local_run_directory / "config.json"
+        config_path.write_text(layout.config_json, encoding="utf-8")
 
     def _download_agent_artifacts(
         self,

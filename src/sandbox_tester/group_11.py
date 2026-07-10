@@ -577,14 +577,9 @@ class G11_T03:
     def _run_shell_command(
         self, shared_memory_name: str
     ) -> subprocess.CompletedProcess[str]:
-        python_code = (
-            "from multiprocessing import shared_memory; "
-            f"name = {shared_memory_name!r}; "
-            f"size = {len(self._EXPECTED_BYTES)}; "
-            "block = shared_memory.SharedMemory(name=name); "
-            "data = bytes(block.buf[:size]); "
-            "print(data.decode('utf-8')); "
-            "block.close()"
+        python_code = _build_shared_memory_reader_python_code(
+            shared_memory_name,
+            len(self._EXPECTED_BYTES),
         )
         command = [sys.executable, "-c", python_code]
 
@@ -665,6 +660,28 @@ def _read_shared_memory_in_child_process(
                 resource_tracker.unregister(resource_name, "shared_memory")
             except Exception:
                 pass
+
+
+def _build_shared_memory_reader_python_code(
+    shared_memory_name: str,
+    size: int,
+) -> str:
+    return (
+        "from multiprocessing import resource_tracker, shared_memory\n"
+        f"name = {shared_memory_name!r}\n"
+        f"size = {size}\n"
+        "block = shared_memory.SharedMemory(name=name)\n"
+        "try:\n"
+        "    data = bytes(block.buf[:size])\n"
+        "    print(data.decode('utf-8'))\n"
+        "finally:\n"
+        "    resource_name = getattr(block, '_name', block.name)\n"
+        "    block.close()\n"
+        "    try:\n"
+        "        resource_tracker.unregister(resource_name, 'shared_memory')\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
 
 
 class G11_T04:
@@ -1388,14 +1405,7 @@ def _build_shared_memory_alternate_attempts(
             command=[
                 sys.executable,
                 "-c",
-                (
-                    "from multiprocessing import shared_memory; "
-                    f"name = {shared_memory_name!r}; "
-                    f"size = {size}; "
-                    "block = shared_memory.SharedMemory(name=name); "
-                    "print(bytes(block.buf[:size]).decode('utf-8')); "
-                    "block.close()"
-                ),
+                _build_shared_memory_reader_python_code(shared_memory_name, size),
             ],
         )
     ]

@@ -376,7 +376,7 @@ async def run_group(
     reporter.group_started(group.id, group.title)
 
     for test in group.tests:
-        reporter.capability_started(test.id, test.title)
+        reporter.capability_started(group.id, test.id, test.title)
 
         shell_result: InvocationResult = await test.run_shell()
         reporter.shell_completed(shell_result)
