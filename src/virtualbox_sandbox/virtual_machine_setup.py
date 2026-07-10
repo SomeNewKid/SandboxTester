@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import socket
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import paramiko
 
 from .agent_profiles import get_python_agent_profile
+from .guest_run_layout import create_sandbox_tester_run_layout
 from .guest_script_runner import GuestScriptRunner
-from .models import GuestScriptResult
+from .models import GuestRunLayout, GuestScriptResult
 
 _SSH_CONNECT_TIMEOUT_SECONDS = 180
 _SSH_POLL_INTERVAL_SECONDS = 2
@@ -53,6 +54,7 @@ class VirtualMachineSetup:
         script_path: Path | None = None,
         source_directory: Path | None = None,
         agent_name: str | None = None,
+        agent_verbose: bool = False,
     ) -> None:
         self._vm_name = vm_name
         self._ssh_target = _SshTarget(
@@ -64,6 +66,8 @@ class VirtualMachineSetup:
         self._script_path = script_path
         self._source_directory = source_directory
         self._agent_name = agent_name
+        self._agent_verbose = agent_verbose
+        self._guest_run_layout: GuestRunLayout | None = None
 
     def setup(self) -> GuestScriptResult:
         """Set up the disposable VM before running sandbox work."""
@@ -77,12 +81,62 @@ class VirtualMachineSetup:
             runner = GuestScriptRunner(client)
             if self._agent_name is not None:
                 profile = get_python_agent_profile(self._agent_name)
-                return runner.run_python_agent(profile)
+                environment_variables = self._prepare_agent_environment(client)
+                result = runner.run_python_agent(profile, environment_variables)
+                return self._download_agent_artifacts(client, result)
 
             script_content = _load_script_content(self._script_path)
             return runner.run_python_script(script_content, self._source_directory)
         finally:
             client.close()
+
+    def _prepare_agent_environment(
+        self,
+        client: paramiko.SSHClient,
+    ) -> dict[str, str] | None:
+        if self._agent_name != "sandbox_tester":
+            return None
+
+        layout = create_sandbox_tester_run_layout(
+            client,
+            self._ssh_target.username,
+        )
+        self._guest_run_layout = layout
+        environment_variables = {
+            "SANDBOX_TESTER_CONFIG_PATH": layout.config_path,
+        }
+
+        if self._agent_verbose:
+            environment_variables["SANDBOX_TESTER_VERBOSE"] = "1"
+
+        return environment_variables
+
+    def _download_agent_artifacts(
+        self,
+        client: paramiko.SSHClient,
+        result: GuestScriptResult,
+    ) -> GuestScriptResult:
+        if self._agent_name != "sandbox_tester" or self._guest_run_layout is None:
+            return result
+
+        report_path = f"{self._guest_run_layout.output_directory}/report.json"
+        artifacts = dict(result.artifacts)
+
+        with client.open_sftp() as sftp:
+            try:
+                with sftp.file(report_path, "r") as report_file:
+                    report_bytes = report_file.read()
+            except OSError as error:
+                if result.exit_code == 0:
+                    raise FileNotFoundError(
+                        "Sandbox Tester completed successfully, but no guest "
+                        f"report was found at {report_path}."
+                    ) from error
+
+                return result
+
+        artifacts["report.json"] = report_bytes.decode("utf-8", errors="replace")
+        return replace(result, artifacts=artifacts)
 
     def _wait_for_ssh(self) -> paramiko.SSHClient:
         deadline = time.monotonic() + _SSH_CONNECT_TIMEOUT_SECONDS

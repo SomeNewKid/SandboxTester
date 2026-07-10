@@ -23,6 +23,7 @@ def save_run_results(
     run_directory.mkdir(parents=True, exist_ok=True)
     _write_text(run_directory / _STDOUT_FILE_NAME, script_result.stdout)
     _write_text(run_directory / _STDERR_FILE_NAME, script_result.stderr)
+    _write_artifacts(run_directory, script_result.artifacts)
     _write_json(run_directory / _RESULT_FILE_NAME, _create_result_data(script_result))
     _write_json(
         run_directory / _METADATA_FILE_NAME,
@@ -38,6 +39,7 @@ def _create_result_data(script_result: GuestScriptResult) -> dict[str, object]:
         "exit_code": script_result.exit_code,
         "stdout_path": _STDOUT_FILE_NAME,
         "stderr_path": _STDERR_FILE_NAME,
+        "artifact_paths": sorted(script_result.artifacts),
     }
 
 
@@ -53,6 +55,11 @@ def _create_metadata_data(clone_result: VmCloneResult) -> dict[str, object]:
 
 def _write_text(path: Path, text: str) -> None:
     path.write_text(f"{text}\n", encoding="utf-8")
+
+
+def _write_artifacts(run_directory: Path, artifacts: dict[str, str]) -> None:
+    for file_name, content in artifacts.items():
+        _write_text(run_directory / file_name, content)
 
 
 def _write_json(path: Path, data: dict[str, object]) -> None:

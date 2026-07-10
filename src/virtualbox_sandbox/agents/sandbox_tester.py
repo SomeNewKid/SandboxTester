@@ -7,14 +7,15 @@ from virtualbox_sandbox.models import PythonAgentProfile
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _SANDBOX_TESTER_SOURCE_DIRECTORY = _REPOSITORY_ROOT / "src" / "sandbox_tester"
 _ENTRY_SCRIPT = """
-import json
-import sandbox_tester
+import os
 
-message = {
-    "message": "sandbox_tester imported",
-    "module_file": sandbox_tester.__file__,
-}
-print(json.dumps(message))
+from sandbox_tester.cli import main
+
+config_path = os.environ["SANDBOX_TESTER_CONFIG_PATH"]
+arguments = ["--config", config_path]
+if os.environ.get("SANDBOX_TESTER_VERBOSE") == "1":
+    arguments.append("--verbose")
+raise SystemExit(main(arguments))
 """
 
 

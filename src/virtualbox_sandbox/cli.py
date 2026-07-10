@@ -51,6 +51,7 @@ def main() -> int:
         script_path=arguments.script,
         source_directory=arguments.source_directory,
         agent_name=arguments.agent,
+        agent_verbose=arguments.verbose,
     )
     return _exit_code_from_result(result)
 
@@ -135,6 +136,11 @@ def _parse_arguments() -> argparse.Namespace:
         help="Python agent profile to upload, install, and run in the disposable VM.",
     )
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Pass verbose progress output through to the selected Python agent.",
+    )
+    parser.add_argument(
         "--finalize-base",
         action="store_true",
         help=(
@@ -157,10 +163,11 @@ def _validate_arguments(
             or arguments.script is not None
             or arguments.source_directory is not None
             or arguments.keep_vm
+            or arguments.verbose
         ):
             parser.error(
                 "--finalize-base cannot be combined with --agent, --script, "
-                "--source-directory, or --keep-vm."
+                "--source-directory, --keep-vm, or --verbose."
             )
         return
 
@@ -272,6 +279,7 @@ def _setup_clone_if_started(
     script_path: Path | None,
     source_directory: Path | None,
     agent_name: str | None,
+    agent_verbose: bool,
 ) -> None:
     if result.status != VmCloneStatus.CLONE_STARTED:
         return
@@ -294,6 +302,7 @@ def _setup_clone_if_started(
         script_path=script_path,
         source_directory=source_directory,
         agent_name=agent_name,
+        agent_verbose=agent_verbose,
     )
 
     try:

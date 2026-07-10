@@ -1,6 +1,6 @@
 """Models for VirtualBox sandbox orchestration."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
@@ -75,6 +75,17 @@ class PythonAgentProfile:
 
 
 @dataclass(frozen=True)
+class GuestRunLayout:
+    """Disposable guest paths prepared for an agent run."""
+
+    run_directory: str
+    allowed_directory: str
+    denied_directory: str
+    output_directory: str
+    config_path: str
+
+
+@dataclass(frozen=True)
 class VmCloneResult:
     """Result of attempting to create and start a sandbox VM clone."""
 
@@ -106,3 +117,4 @@ class GuestScriptResult:
     exit_code: int
     stdout: str
     stderr: str
+    artifacts: dict[str, str] = field(default_factory=dict)

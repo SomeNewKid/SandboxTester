@@ -40,7 +40,11 @@ class GuestScriptRunner:
             python_executable="python3",
         )
 
-    def run_python_agent(self, profile: PythonAgentProfile) -> GuestScriptResult:
+    def run_python_agent(
+        self,
+        profile: PythonAgentProfile,
+        environment_variables: dict[str, str] | None = None,
+    ) -> GuestScriptResult:
         """Copy a Python agent source tree, install dependencies, and run it."""
         script_path = _create_remote_script_path()
         venv_path = _create_remote_venv_path()
@@ -53,6 +57,7 @@ class GuestScriptRunner:
             script_path,
             source_path,
             python_executable=python_executable,
+            environment_variables=environment_variables,
         )
 
     def _write_remote_source_directory(
@@ -157,11 +162,13 @@ class GuestScriptRunner:
         script_path: str,
         source_path: str | None,
         python_executable: str,
+        environment_variables: dict[str, str] | None = None,
     ) -> GuestScriptResult:
         command = _create_remote_python_command(
             script_path,
             source_path,
             python_executable,
+            environment_variables,
         )
         _, stdout, stderr = self._client.exec_command(command)
         exit_code = stdout.channel.recv_exit_status()
@@ -253,18 +260,32 @@ def _create_remote_python_command(
     script_path: str,
     source_path: str | None,
     python_executable: str,
+    environment_variables: dict[str, str] | None,
 ) -> str:
     quoted_script_path = shlex.quote(script_path)
     quoted_python = shlex.quote(python_executable)
+    environment_prefix = _create_environment_prefix(environment_variables)
 
     if source_path is None:
-        return f"{quoted_python} {quoted_script_path}"
+        return f"{environment_prefix}{quoted_python} {quoted_script_path}"
 
     quoted_source_path = shlex.quote(source_path)
     return (
-        f"PYTHONPATH={quoted_source_path}:$PYTHONPATH "
+        f"{environment_prefix}PYTHONPATH={quoted_source_path}:$PYTHONPATH "
         f"{quoted_python} {quoted_script_path}"
     )
+
+
+def _create_environment_prefix(
+    environment_variables: dict[str, str] | None,
+) -> str:
+    if not environment_variables:
+        return ""
+
+    assignments = [
+        f"{name}={shlex.quote(value)}" for name, value in environment_variables.items()
+    ]
+    return f"{' '.join(assignments)} "
 
 
 def _run_remote_command(client: paramiko.SSHClient, command: str) -> None:
