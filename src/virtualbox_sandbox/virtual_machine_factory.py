@@ -5,12 +5,17 @@ from __future__ import annotations
 import datetime as dt
 import os
 import re
+import shlex
 import socket
 import subprocess
 import time
 from pathlib import Path
 
+import paramiko
+
 from .models import (
+    BaseFinalizationResult,
+    BaseFinalizationStatus,
     VirtualBoxConfiguration,
     VirtualMachine,
     VirtualMachineState,
@@ -25,6 +30,11 @@ _ENABLE_OPENSSH_COMMAND = (
     "systemctl enable ssh && "
     "systemctl start ssh"
 )
+_FINALIZE_BASE_PACKAGES = [
+    "python3-pip",
+    "python3-venv",
+]
+_BASE_SSH_FORWARD_NAME = "sandbox-base-ssh"
 _RUN_VM_NAME_PREFIX = "Sandbox Tester Run"
 _SSH_FORWARD_NAME = "sandbox-ssh"
 _SSH_FORWARD_HOST = "127.0.0.1"
@@ -81,6 +91,48 @@ def stop_and_remove_vm_clone(vm_name: str) -> None:
         _wait_for_virtual_machine_to_stop(vboxmanage_path, vm_name)
 
     _run_vboxmanage(vboxmanage_path, ["unregistervm", vm_name, "--delete"])
+
+
+def finalize_base_vm(configuration: VirtualBoxConfiguration) -> BaseFinalizationResult:
+    """Install base VM packages needed for Python agent execution."""
+    vboxmanage_path = _find_vboxmanage()
+    state = _get_virtual_machine_state(vboxmanage_path, configuration.vm_name)
+
+    if state == VirtualMachineState.NOT_CREATED:
+        return BaseFinalizationResult(
+            status=BaseFinalizationStatus.MISSING,
+            base_vm_name=configuration.vm_name,
+        )
+
+    if state == VirtualMachineState.OTHER:
+        return BaseFinalizationResult(
+            status=BaseFinalizationStatus.NOT_READY,
+            base_vm_name=configuration.vm_name,
+        )
+
+    ssh_port = _find_available_host_port()
+
+    if state == VirtualMachineState.STOPPED:
+        _add_stopped_vm_nat_forward(vboxmanage_path, configuration.vm_name, ssh_port)
+        _run_vboxmanage(
+            vboxmanage_path,
+            ["startvm", "--type=headless", configuration.vm_name],
+        )
+    else:
+        _add_running_vm_nat_forward(vboxmanage_path, configuration.vm_name, ssh_port)
+
+    try:
+        _install_base_vm_packages(configuration, ssh_port)
+        _wait_for_virtual_machine_to_stop(vboxmanage_path, configuration.vm_name)
+    finally:
+        _remove_base_vm_nat_forward(vboxmanage_path, configuration.vm_name)
+
+    return BaseFinalizationResult(
+        status=BaseFinalizationStatus.FINALIZED,
+        base_vm_name=configuration.vm_name,
+        ssh_host=_SSH_FORWARD_HOST,
+        ssh_port=ssh_port,
+    )
 
 
 def _find_vboxmanage() -> Path:
@@ -347,8 +399,147 @@ def _find_available_host_port() -> int:
         return int(port)
 
 
+def _add_stopped_vm_nat_forward(
+    vboxmanage_path: Path,
+    vm_name: str,
+    ssh_port: int,
+) -> None:
+    _run_vboxmanage(
+        vboxmanage_path,
+        [
+            "modifyvm",
+            vm_name,
+            f"--nat-pf1={_BASE_SSH_FORWARD_NAME},tcp,{_SSH_FORWARD_HOST},{ssh_port},,22",
+        ],
+    )
+
+
+def _add_running_vm_nat_forward(
+    vboxmanage_path: Path,
+    vm_name: str,
+    ssh_port: int,
+) -> None:
+    _run_vboxmanage(
+        vboxmanage_path,
+        [
+            "controlvm",
+            vm_name,
+            "natpf1",
+            f"{_BASE_SSH_FORWARD_NAME},tcp,{_SSH_FORWARD_HOST},{ssh_port},,22",
+        ],
+    )
+
+
+def _remove_base_vm_nat_forward(vboxmanage_path: Path, vm_name: str) -> None:
+    state = _get_virtual_machine_state(vboxmanage_path, vm_name)
+
+    if state == VirtualMachineState.NOT_CREATED:
+        return
+
+    if state == VirtualMachineState.RUNNING:
+        command = ["controlvm", vm_name, "natpf1delete", _BASE_SSH_FORWARD_NAME]
+    else:
+        command = ["modifyvm", vm_name, f"--nat-pf1=delete={_BASE_SSH_FORWARD_NAME}"]
+
+    try:
+        _run_vboxmanage(vboxmanage_path, command)
+    except RuntimeError:
+        pass
+
+
+def _install_base_vm_packages(
+    configuration: VirtualBoxConfiguration,
+    ssh_port: int,
+) -> None:
+    client = _wait_for_ssh(configuration, ssh_port)
+
+    try:
+        _run_sudo_command(
+            client,
+            configuration.guest_credentials.password,
+            "apt-get update",
+        )
+        packages = " ".join(shlex.quote(package) for package in _FINALIZE_BASE_PACKAGES)
+        _run_sudo_command(
+            client,
+            configuration.guest_credentials.password,
+            f"env DEBIAN_FRONTEND=noninteractive apt-get install -y {packages}",
+        )
+        _run_sudo_command(
+            client,
+            configuration.guest_credentials.password,
+            "shutdown now",
+        )
+    finally:
+        client.close()
+
+
+def _wait_for_ssh(
+    configuration: VirtualBoxConfiguration,
+    ssh_port: int,
+) -> paramiko.SSHClient:
+    timeout_seconds = 180
+    deadline = time.monotonic() + timeout_seconds
+    last_error: Exception | None = None
+
+    while time.monotonic() < deadline:
+        try:
+            return _connect_ssh(configuration, ssh_port)
+        except (
+            OSError,
+            paramiko.AuthenticationException,
+            paramiko.SSHException,
+        ) as error:
+            last_error = error
+            time.sleep(2)
+
+    raise RuntimeError(
+        f"Timed out waiting for SSH on base VM '{configuration.vm_name}': {last_error}"
+    )
+
+
+def _connect_ssh(
+    configuration: VirtualBoxConfiguration,
+    ssh_port: int,
+) -> paramiko.SSHClient:
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(
+        hostname=_SSH_FORWARD_HOST,
+        port=ssh_port,
+        username=configuration.guest_credentials.user,
+        password=configuration.guest_credentials.password,
+        look_for_keys=False,
+        allow_agent=False,
+        timeout=10,
+        banner_timeout=10,
+        auth_timeout=10,
+    )
+    return client
+
+
+def _run_sudo_command(
+    client: paramiko.SSHClient,
+    password: str,
+    command: str,
+) -> None:
+    quoted_password = shlex.quote(password)
+    remote_command = f"printf '%s\\n' {quoted_password} | sudo -S {command}"
+    _, stdout, stderr = client.exec_command(remote_command)
+    exit_code = stdout.channel.recv_exit_status()
+    stdout_text = stdout.read().decode("utf-8", errors="replace").strip()
+    stderr_text = stderr.read().decode("utf-8", errors="replace").strip()
+
+    if exit_code != 0:
+        raise RuntimeError(
+            f"Remote sudo command failed with exit code {exit_code}: {command}\n"
+            f"stdout:\n{stdout_text}\n"
+            f"stderr:\n{stderr_text}"
+        )
+
+
 def _wait_for_virtual_machine_to_stop(vboxmanage_path: Path, vm_name: str) -> None:
-    timeout_seconds = 30
+    timeout_seconds = 180
     deadline = time.monotonic() + timeout_seconds
 
     while time.monotonic() < deadline:

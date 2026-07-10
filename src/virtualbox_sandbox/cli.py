@@ -5,10 +5,21 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .agent_profiles import SUPPORTED_AGENT_NAMES
 from .credentials import load_or_create_guest_credentials
-from .models import VirtualBoxConfiguration, VmCloneResult, VmCloneStatus
+from .models import (
+    BaseFinalizationResult,
+    BaseFinalizationStatus,
+    VirtualBoxConfiguration,
+    VmCloneResult,
+    VmCloneStatus,
+)
 from .run_results import save_run_results
-from .virtual_machine_factory import create_vm_clone, stop_and_remove_vm_clone
+from .virtual_machine_factory import (
+    create_vm_clone,
+    finalize_base_vm,
+    stop_and_remove_vm_clone,
+)
 from .virtual_machine_setup import VirtualMachineSetup
 
 _DEFAULT_VM_NAME = "Sandbox Tester Base"
@@ -25,6 +36,12 @@ def main() -> int:
     """Run the command-line interface."""
     arguments = _parse_arguments()
     configuration = _configuration_from_arguments(arguments)
+
+    if arguments.finalize_base:
+        result = finalize_base_vm(configuration)
+        _print_base_finalization_result(result)
+        return _exit_code_from_base_finalization_result(result)
+
     result = create_vm_clone(configuration)
     _print_result(result)
     _setup_clone_if_started(
@@ -32,6 +49,8 @@ def main() -> int:
         configuration,
         keep_vm=arguments.keep_vm,
         script_path=arguments.script,
+        source_directory=arguments.source_directory,
+        agent_name=arguments.agent,
     )
     return _exit_code_from_result(result)
 
@@ -101,7 +120,55 @@ def _parse_arguments() -> argparse.Namespace:
         default=None,
         help="Local Python script to upload and run in the disposable VM.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--source-directory",
+        type=Path,
+        default=None,
+        help=(
+            "Local source tree to upload and add to PYTHONPATH for the guest script."
+        ),
+    )
+    parser.add_argument(
+        "--agent",
+        choices=SUPPORTED_AGENT_NAMES,
+        default=None,
+        help="Python agent profile to upload, install, and run in the disposable VM.",
+    )
+    parser.add_argument(
+        "--finalize-base",
+        action="store_true",
+        help=(
+            "Start the base VM, install Python agent support packages, shut it "
+            "down, and remove the temporary SSH port forward."
+        ),
+    )
+    arguments = parser.parse_args()
+    _validate_arguments(parser, arguments)
+    return arguments
+
+
+def _validate_arguments(
+    parser: argparse.ArgumentParser,
+    arguments: argparse.Namespace,
+) -> None:
+    if arguments.finalize_base:
+        if (
+            arguments.agent is not None
+            or arguments.script is not None
+            or arguments.source_directory is not None
+            or arguments.keep_vm
+        ):
+            parser.error(
+                "--finalize-base cannot be combined with --agent, --script, "
+                "--source-directory, or --keep-vm."
+            )
+        return
+
+    if arguments.agent is None:
+        return
+
+    if arguments.script is not None or arguments.source_directory is not None:
+        parser.error("--agent cannot be combined with --script or --source-directory.")
 
 
 def _configuration_from_arguments(
@@ -159,6 +226,28 @@ def _print_result(result: VmCloneResult) -> None:
     )
 
 
+def _print_base_finalization_result(result: BaseFinalizationResult) -> None:
+    if result.status == BaseFinalizationStatus.FINALIZED:
+        print(
+            f"Base VM '{result.base_vm_name}' was finalized and shut down. "
+            "Temporary SSH port forwarding was removed."
+        )
+        return
+
+    if result.status == BaseFinalizationStatus.MISSING:
+        print(
+            f"Base VM '{result.base_vm_name}' does not exist. Run without "
+            "--finalize-base first to create and install it."
+        )
+        return
+
+    print(
+        f"Base VM '{result.base_vm_name}' exists but is not ready to finalize. "
+        "Open VirtualBox, shut it down cleanly or inspect its state, then run "
+        "this command again."
+    )
+
+
 def _exit_code_from_result(result: VmCloneResult) -> int:
     if result.status == VmCloneStatus.ISO_MISSING:
         return 2
@@ -169,11 +258,20 @@ def _exit_code_from_result(result: VmCloneResult) -> int:
     return 0
 
 
+def _exit_code_from_base_finalization_result(result: BaseFinalizationResult) -> int:
+    if result.status == BaseFinalizationStatus.FINALIZED:
+        return 0
+
+    return 1
+
+
 def _setup_clone_if_started(
     result: VmCloneResult,
     configuration: VirtualBoxConfiguration,
     keep_vm: bool,
     script_path: Path | None,
+    source_directory: Path | None,
+    agent_name: str | None,
 ) -> None:
     if result.status != VmCloneStatus.CLONE_STARTED:
         return
@@ -194,6 +292,8 @@ def _setup_clone_if_started(
         configuration.guest_credentials.user,
         configuration.guest_credentials.password,
         script_path=script_path,
+        source_directory=source_directory,
+        agent_name=agent_name,
     )
 
     try:
@@ -201,9 +301,9 @@ def _setup_clone_if_started(
         save_run_results(result.run_directory, result, setup_result)
         print(f"Remote Python probe completed with exit code {setup_result.exit_code}.")
         print(f"Run results saved to: {result.run_directory}")
-        print(f"Remote stdout: {setup_result.stdout}")
+        print(f"Remote stdout saved to: {result.run_directory / 'stdout.txt'}")
         if setup_result.stderr:
-            print(f"Remote stderr: {setup_result.stderr}")
+            print(f"Remote stderr saved to: {result.run_directory / 'stderr.txt'}")
     finally:
         if keep_vm:
             print(f"Kept disposable run VM '{result.run_vm_name}'.")

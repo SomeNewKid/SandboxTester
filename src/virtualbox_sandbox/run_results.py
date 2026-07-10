@@ -33,6 +33,7 @@ def save_run_results(
 def _create_result_data(script_result: GuestScriptResult) -> dict[str, object]:
     return {
         "script_path": script_result.script_path,
+        "source_path": script_result.source_path,
         "command": script_result.command,
         "exit_code": script_result.exit_code,
         "stdout_path": _STDOUT_FILE_NAME,

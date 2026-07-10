@@ -9,6 +9,7 @@ from pathlib import Path
 
 import paramiko
 
+from .agent_profiles import get_python_agent_profile
 from .guest_script_runner import GuestScriptRunner
 from .models import GuestScriptResult
 
@@ -50,6 +51,8 @@ class VirtualMachineSetup:
         username: str,
         password: str,
         script_path: Path | None = None,
+        source_directory: Path | None = None,
+        agent_name: str | None = None,
     ) -> None:
         self._vm_name = vm_name
         self._ssh_target = _SshTarget(
@@ -59,6 +62,8 @@ class VirtualMachineSetup:
             password=password,
         )
         self._script_path = script_path
+        self._source_directory = source_directory
+        self._agent_name = agent_name
 
     def setup(self) -> GuestScriptResult:
         """Set up the disposable VM before running sandbox work."""
@@ -70,8 +75,12 @@ class VirtualMachineSetup:
 
         try:
             runner = GuestScriptRunner(client)
+            if self._agent_name is not None:
+                profile = get_python_agent_profile(self._agent_name)
+                return runner.run_python_agent(profile)
+
             script_content = _load_script_content(self._script_path)
-            return runner.run_python_script(script_content)
+            return runner.run_python_script(script_content, self._source_directory)
         finally:
             client.close()
 

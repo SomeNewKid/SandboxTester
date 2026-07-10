@@ -24,6 +24,14 @@ class VmCloneStatus(StrEnum):
     NOT_READY = "not_ready"
 
 
+class BaseFinalizationStatus(StrEnum):
+    """Result status for base VM finalization."""
+
+    FINALIZED = "finalized"
+    MISSING = "missing"
+    NOT_READY = "not_ready"
+
+
 @dataclass(frozen=True)
 class VirtualMachine:
     """A registered VirtualBox virtual machine."""
@@ -55,6 +63,18 @@ class VirtualBoxConfiguration:
 
 
 @dataclass(frozen=True)
+class PythonAgentProfile:
+    """Configuration for a Python agent that can run in the sandbox VM."""
+
+    name: str
+    source_directory: Path
+    package_directory_name: str
+    dependencies: list[str]
+    entry_script: str
+    exclude_patterns: list[str]
+
+
+@dataclass(frozen=True)
 class VmCloneResult:
     """Result of attempting to create and start a sandbox VM clone."""
 
@@ -67,10 +87,21 @@ class VmCloneResult:
 
 
 @dataclass(frozen=True)
+class BaseFinalizationResult:
+    """Result of attempting to finalize the base VM."""
+
+    status: BaseFinalizationStatus
+    base_vm_name: str
+    ssh_host: str | None = None
+    ssh_port: int | None = None
+
+
+@dataclass(frozen=True)
 class GuestScriptResult:
     """Result of running a Python script in the guest VM."""
 
     script_path: str
+    source_path: str | None
     command: str
     exit_code: int
     stdout: str
