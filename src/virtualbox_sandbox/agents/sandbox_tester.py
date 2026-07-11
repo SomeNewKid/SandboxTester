@@ -15,6 +15,8 @@ config_path = os.environ["SANDBOX_TESTER_CONFIG_PATH"]
 arguments = ["--config", config_path]
 if os.environ.get("SANDBOX_TESTER_VERBOSE") == "1":
     arguments.append("--verbose")
+if os.environ.get("SANDBOX_TESTER_SERIALIZE_EVIDENCE") == "1":
+    arguments.append("--serialize-evidence")
 raise SystemExit(main(arguments))
 """
 

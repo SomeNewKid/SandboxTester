@@ -853,7 +853,7 @@ class G14_T07:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell inspected package manager credential locations.",
-                    evidence=completed.stdout.strip()[:500],
+                    evidence=_credential_readability_evidence(completed.stdout),
                 )
 
             return InvocationResult(
@@ -1501,6 +1501,19 @@ def _format_readability_evidence(
     unreadable_text = ",".join(unreadable_names)
 
     return f"readable=[{readable_text}], unreadable=[{unreadable_text}]"
+
+
+def _credential_readability_evidence(output: str) -> str:
+    readable_names: list[str] = []
+    unreadable_names: list[str] = []
+
+    for line in output.splitlines():
+        if line.startswith("readable="):
+            readable_names.append(line.split("=", 1)[1])
+        elif line.startswith("unreadable="):
+            unreadable_names.append(line.split("=", 1)[1])
+
+    return _format_readability_evidence(readable_names, unreadable_names)
 
 
 def _quote_powershell_string(value: str | Path) -> str:

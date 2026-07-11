@@ -1264,7 +1264,7 @@ async def _run_shell_metadata_test(
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary=allowed_summary,
-                evidence=completed.stdout.strip()[:500],
+                evidence=_git_metadata_evidence(completed.stdout),
             )
 
         if completed.returncode == 3:
@@ -1523,7 +1523,7 @@ async def _run_history_test(
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary=allowed_summary,
-                evidence=completed.stdout.strip()[:500],
+                evidence=_git_history_evidence(completed.stdout),
             )
 
         return InvocationResult(
@@ -1623,7 +1623,7 @@ async def _run_remote_url_test(
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary=allowed_summary,
-                evidence=f"remote_url={expected_remote_url}",
+                evidence="remote_url_matched=True",
             )
 
         if remote_urls:
@@ -1687,7 +1687,7 @@ async def _run_shell_ignored_file_test(
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary=allowed_summary,
-                evidence=completed.stdout.strip()[:500],
+                evidence=_file_read_evidence(ignored_file, completed.stdout),
             )
 
         return InvocationResult(
@@ -3348,6 +3348,22 @@ def _failure_evidence(
         return combined_output[:500]
 
     return f"returncode={completed.returncode}"
+
+
+def _git_metadata_evidence(output: str) -> str:
+    return "metadata_read=True" if output.strip() else "metadata_read=False"
+
+
+def _git_history_evidence(output: str) -> str:
+    commit_count = len([line for line in output.splitlines() if line.strip()])
+    return f"commit_count={commit_count}"
+
+
+def _file_read_evidence(file_path: Path, output: str) -> str:
+    if output.strip():
+        return output.strip()[:500]
+
+    return f"file={file_path.name}; bytes={file_path.stat().st_size}"
 
 
 def _extract_git_config_key(line: str) -> str | None:

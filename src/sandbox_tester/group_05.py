@@ -125,7 +125,7 @@ class G05_T04:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell read the path/search-path environment variable.",
-                    evidence=completed.stdout.strip()[:500],
+                    evidence=_path_variable_evidence(completed.stdout),
                 )
 
             return InvocationResult(
@@ -162,7 +162,7 @@ class G05_T04:
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary="Python runtime read the path/search-path variable.",
-                evidence=path_variable[:500],
+                evidence=_path_variable_evidence(path_variable),
             )
         except PermissionError as error:
             return InvocationResult(
@@ -811,6 +811,22 @@ def _alternate_evidence(
     combined_output: str,
 ) -> str:
     if combined_output:
+        if _is_path_variable_attempt(completed.args):
+            return _path_variable_evidence(combined_output)
+
         return combined_output[:500]
 
     return f"returncode={completed.returncode}"
+
+
+def _is_path_variable_attempt(args: object) -> bool:
+    if not isinstance(args, list):
+        return False
+
+    command_text = " ".join(str(arg).lower() for arg in args)
+    return "path" in command_text
+
+
+def _path_variable_evidence(value: str) -> str:
+    entries = [entry for entry in value.split(os.pathsep) if entry]
+    return f"path_entry_count={len(entries)}; bytes={len(value.encode())}"

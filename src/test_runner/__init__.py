@@ -1,1 +1,0 @@
-"""Python CLI application package."""

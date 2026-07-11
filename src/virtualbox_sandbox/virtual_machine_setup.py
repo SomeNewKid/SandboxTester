@@ -55,6 +55,7 @@ class VirtualMachineSetup:
         source_directory: Path | None = None,
         agent_name: str | None = None,
         agent_verbose: bool = False,
+        agent_serialize_evidence: bool = False,
         local_run_directory: Path | None = None,
     ) -> None:
         self._vm_name = vm_name
@@ -68,6 +69,7 @@ class VirtualMachineSetup:
         self._source_directory = source_directory
         self._agent_name = agent_name
         self._agent_verbose = agent_verbose
+        self._agent_serialize_evidence = agent_serialize_evidence
         self._local_run_directory = local_run_directory
         self._guest_run_layout: GuestRunLayout | None = None
 
@@ -111,6 +113,9 @@ class VirtualMachineSetup:
 
         if self._agent_verbose:
             environment_variables["SANDBOX_TESTER_VERBOSE"] = "1"
+
+        if self._agent_serialize_evidence:
+            environment_variables["SANDBOX_TESTER_SERIALIZE_EVIDENCE"] = "1"
 
         return environment_variables
 

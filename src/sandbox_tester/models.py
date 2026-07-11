@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+from .redaction import redact_evidence
+
 
 class Outcome(StrEnum):
     ALLOWED = "Allowed"
@@ -17,6 +19,9 @@ class InvocationResult:
     summary: str
     evidence: str = ""
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence", redact_evidence(self.evidence))
+
 
 @dataclass(frozen=True)
 class AlternateAttemptResult:
@@ -26,6 +31,9 @@ class AlternateAttemptResult:
     bypass_class: str
     command_family: str
     evidence: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence", redact_evidence(self.evidence))
 
 
 @dataclass(frozen=True)

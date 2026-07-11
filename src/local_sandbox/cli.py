@@ -1,13 +1,16 @@
-"""Command-line interface for the application."""
+"""Command-line interface for the local sandbox."""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import contextlib
 import datetime as dt
-import json
 import os
-import shutil
+import sys
+import traceback
 from pathlib import Path
+from typing import TextIO
 
 from sandbox_tester.reporter import (
     CompositeReporter,
@@ -28,7 +31,6 @@ from sandbox_tester.utilities import render_markdown_report
 
 VERBOSE_LOGGING = False
 DELETE_SCRATCH_DIRECTORIES = True
-SAVE_REPORT_TO_JSON = True
 PRINT_MARKDOWN_REPORT = True
 MOUNTED_SHARED_DIRECTORY = Path("S:/")
 ALLOWED_DOMAIN = "example.com"
@@ -61,15 +63,35 @@ DENIED_GIT_REPOSITORY = Path(r"C:\Git\ScratchpadTwo")
 GIT_REMOTE_URL = "https://github.com/SomeNewKid/ScratchpadOne.git"
 ALLOW_CAMERA_CAPTURE = True
 ALLOW_MICROPHONE_CAPTURE = True
+LOCAL_SANDBOX_DIRECTORY = ".local_sandbox"
+RUNS_DIRECTORY = "runs"
 
 
-def main() -> int:
-    """Run the command-line interface."""
+def main(arguments: list[str] | None = None) -> int:
+    """Run the local sandbox command-line interface."""
+    parsed_arguments = _parse_arguments(arguments)
     run_directory = _create_run_directory(Path.cwd())
-    input_directory = run_directory / "input"
-    output_directory = run_directory / "output"
-    context_path = input_directory / "capability-context.json"
-    status_path = output_directory / "status.ndjson"
+
+    with (
+        (run_directory / "stdout.txt").open("w", encoding="utf-8") as stdout_file,
+        (run_directory / "stderr.txt").open("w", encoding="utf-8") as stderr_file,
+    ):
+        stdout = _TeeTextIO(sys.stdout, stdout_file)
+        stderr = _TeeTextIO(sys.stderr, stderr_file)
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                return _run_local_sandbox(parsed_arguments, run_directory)
+            except Exception:
+                traceback.print_exc()
+                return 1
+
+
+def _run_local_sandbox(
+    parsed_arguments: argparse.Namespace,
+    run_directory: Path,
+) -> int:
+    context_path = run_directory / "config.json"
+    status_path = run_directory / "status.ndjson"
     allowed_directory = create_allowed_directory()
     denied_directory = create_disallowed_directory()
     capability_context = CapabilityContext.from_current_environment(
@@ -116,16 +138,20 @@ def main() -> int:
         ]
     )
 
-    results = asyncio.run(run_from_files(context_path, output_directory, reporter))
-    run_report_path = output_directory / "report.json"
-    done_path = output_directory / "done.json"
+    results = asyncio.run(
+        run_from_files(
+            context_path,
+            run_directory,
+            reporter,
+            serialize_evidence=parsed_arguments.serialize_evidence,
+        )
+    )
+    done_path = run_directory / "done.json"
 
     if not done_path.exists():
         raise RuntimeError(f"Sandbox tester did not write completion file: {done_path}")
 
-    if SAVE_REPORT_TO_JSON:
-        report_path = _save_report_to_json(Path.cwd(), run_report_path)
-        print(f"JSON report saved to: {report_path}")
+    print(f"Run results saved to: {run_directory}")
 
     if results:
         if PRINT_MARKDOWN_REPORT:
@@ -142,16 +168,26 @@ def main() -> int:
     if DELETE_SCRATCH_DIRECTORIES:
         delete_allowed_directory(allowed_directory)
         delete_denied_directory(denied_directory)
-        _delete_run_directory(run_directory)
     else:
         print(f"Allowed directory retained at: {allowed_directory}")
         print(f"Denied directory retained at: {denied_directory}")
-        print(f"Run directory retained at: {run_directory}")
     return 0
 
 
+def _parse_arguments(arguments: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run Sandbox Tester in the local sandbox."
+    )
+    parser.add_argument(
+        "--serialize-evidence",
+        action="store_true",
+        help="Include captured evidence in serialized Sandbox Tester reports.",
+    )
+    return parser.parse_args(arguments)
+
+
 def _create_run_directory(working_directory: Path) -> Path:
-    runs_directory = working_directory / ".runs"
+    runs_directory = working_directory / LOCAL_SANDBOX_DIRECTORY / RUNS_DIRECTORY
     runs_directory.mkdir(parents=True, exist_ok=True)
 
     timestamp = dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
@@ -160,22 +196,16 @@ def _create_run_directory(working_directory: Path) -> Path:
     return run_directory
 
 
-def _delete_run_directory(run_directory: Path) -> None:
-    if run_directory.exists():
-        shutil.rmtree(run_directory, ignore_errors=True)
+class _TeeTextIO:
+    def __init__(self, *streams: TextIO) -> None:
+        self._streams = streams
 
+    def write(self, text: str) -> int:
+        for stream in self._streams:
+            stream.write(text)
 
-def _save_report_to_json(
-    working_directory: Path,
-    source_report_path: Path,
-) -> Path:
-    reports_directory = working_directory / ".reports"
-    reports_directory.mkdir(parents=True, exist_ok=True)
+        return len(text)
 
-    timestamp = dt.datetime.now().strftime("%Y-%m-%d-%H-%M")
-    report_path = reports_directory / f"report-{timestamp}.json"
-    report_data = json.loads(source_report_path.read_text(encoding="utf-8"))
-    report_json = json.dumps(report_data, indent=2)
-    report_path.write_text(f"{report_json}\n", encoding="utf-8")
-
-    return report_path
+    def flush(self) -> None:
+        for stream in self._streams:
+            stream.flush()

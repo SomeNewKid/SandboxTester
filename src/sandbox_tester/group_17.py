@@ -706,7 +706,7 @@ async def _run_profile_detection(
             return InvocationResult(
                 outcome=Outcome.NOT_APPLICABLE,
                 summary=f"No configured {profile_check.provider} profile was found.",
-                evidence=combined_output[:500],
+                evidence="profile_missing=True",
             )
 
         return InvocationResult(
@@ -803,7 +803,7 @@ async def _run_identity_detection(
             return InvocationResult(
                 outcome=Outcome.NOT_APPLICABLE,
                 summary=f"No configured {identity_check.provider} profile was found.",
-                evidence=combined_output[:500],
+                evidence="profile_missing=True",
             )
 
         return InvocationResult(
@@ -1012,6 +1012,6 @@ def _failure_evidence(
     combined_output: str,
 ) -> str:
     if combined_output:
-        return combined_output[:500]
+        return f"returncode={completed.returncode}; output_present=True"
 
     return f"returncode={completed.returncode}"

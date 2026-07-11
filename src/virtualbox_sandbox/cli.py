@@ -52,6 +52,7 @@ def main() -> int:
         source_directory=arguments.source_directory,
         agent_name=arguments.agent,
         agent_verbose=arguments.verbose,
+        agent_serialize_evidence=arguments.serialize_evidence,
     )
     return _exit_code_from_result(result)
 
@@ -141,6 +142,11 @@ def _parse_arguments() -> argparse.Namespace:
         help="Pass verbose progress output through to the selected Python agent.",
     )
     parser.add_argument(
+        "--serialize-evidence",
+        action="store_true",
+        help="Pass --serialize-evidence through to the sandbox_tester agent.",
+    )
+    parser.add_argument(
         "--finalize-base",
         action="store_true",
         help=(
@@ -164,12 +170,17 @@ def _validate_arguments(
             or arguments.source_directory is not None
             or arguments.keep_vm
             or arguments.verbose
+            or arguments.serialize_evidence
         ):
             parser.error(
                 "--finalize-base cannot be combined with --agent, --script, "
-                "--source-directory, --keep-vm, or --verbose."
+                "--source-directory, --keep-vm, --verbose, or "
+                "--serialize-evidence."
             )
         return
+
+    if arguments.serialize_evidence and arguments.agent != "sandbox_tester":
+        parser.error("--serialize-evidence requires --agent sandbox_tester.")
 
     if arguments.agent is None:
         return
@@ -280,6 +291,7 @@ def _setup_clone_if_started(
     source_directory: Path | None,
     agent_name: str | None,
     agent_verbose: bool,
+    agent_serialize_evidence: bool,
 ) -> None:
     if result.status != VmCloneStatus.CLONE_STARTED:
         return
@@ -303,6 +315,7 @@ def _setup_clone_if_started(
         source_directory=source_directory,
         agent_name=agent_name,
         agent_verbose=agent_verbose,
+        agent_serialize_evidence=agent_serialize_evidence,
         local_run_directory=result.run_directory,
     )
 

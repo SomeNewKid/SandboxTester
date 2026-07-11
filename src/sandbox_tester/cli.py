@@ -24,7 +24,14 @@ def main(arguments: list[str] | None = None) -> int:
     output_directory = _get_output_directory(config_path, parsed_arguments.output)
     reporter = _create_reporter(output_directory, parsed_arguments.verbose)
 
-    asyncio.run(run_from_files(config_path, output_directory, reporter))
+    asyncio.run(
+        run_from_files(
+            config_path,
+            output_directory,
+            reporter,
+            serialize_evidence=parsed_arguments.serialize_evidence,
+        )
+    )
     print(f"Sandbox Tester report saved to: {output_directory / 'report.json'}")
     return 0
 
@@ -52,6 +59,11 @@ def _parse_arguments(arguments: list[str] | None) -> argparse.Namespace:
         "--verbose",
         action="store_true",
         help="Print detailed progress to stdout.",
+    )
+    parser.add_argument(
+        "--serialize-evidence",
+        action="store_true",
+        help="Include captured evidence in report.json.",
     )
     return parser.parse_args(arguments)
 

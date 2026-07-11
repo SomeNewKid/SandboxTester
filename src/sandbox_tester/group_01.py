@@ -9,6 +9,7 @@ import platform
 import socket
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -3680,6 +3681,9 @@ class _AlternateRuntimeAttempt:
     bypass_class: str
     command_family: str
     command: list[str]
+    evidence_builder: Callable[[subprocess.CompletedProcess[str], str], str] | None = (
+        None
+    )
 
 
 def _build_working_directory_alternate_attempts(
@@ -4054,6 +4058,7 @@ def _build_environment_summary_alternate_attempts(
                 bypass_class="alternate_command",
                 command_family="cmd/set",
                 command=["cmd", "/c", "set"],
+                evidence_builder=_environment_names_evidence,
             ),
             _AlternateRuntimeAttempt(
                 id="A02",
@@ -4067,6 +4072,7 @@ def _build_environment_summary_alternate_attempts(
                     "-Command",
                     "Get-ChildItem Env:",
                 ],
+                evidence_builder=_environment_names_evidence,
             ),
         ]
 
@@ -4077,6 +4083,7 @@ def _build_environment_summary_alternate_attempts(
             bypass_class="alternate_command",
             command_family="printenv",
             command=["printenv"],
+            evidence_builder=_environment_names_evidence,
         ),
         _AlternateRuntimeAttempt(
             id="A02",
@@ -4084,6 +4091,7 @@ def _build_environment_summary_alternate_attempts(
             bypass_class="alternate_command",
             command_family="procfs",
             command=["sh", "-c", "tr '\\0' '\\n' < /proc/self/environ"],
+            evidence_builder=_environment_names_evidence,
         ),
     ]
 
@@ -4154,7 +4162,7 @@ def _run_runtime_alternate_attempt(
             outcome=outcome,
             bypass_class=attempt.bypass_class,
             command_family=attempt.command_family,
-            evidence=_failure_evidence(completed, combined_output),
+            evidence=_alternate_evidence(attempt, completed, combined_output),
         )
     except FileNotFoundError as error:
         return _runtime_alternate_exception_result(
@@ -4195,3 +4203,46 @@ def _failure_evidence(
         return combined_output[:500]
 
     return f"returncode={completed.returncode}"
+
+
+def _alternate_evidence(
+    attempt: _AlternateRuntimeAttempt,
+    completed: subprocess.CompletedProcess[str],
+    combined_output: str,
+) -> str:
+    if attempt.evidence_builder is not None:
+        return attempt.evidence_builder(completed, combined_output)
+
+    return _failure_evidence(completed, combined_output)
+
+
+def _environment_names_evidence(
+    completed: subprocess.CompletedProcess[str],
+    combined_output: str,
+) -> str:
+    if completed.returncode != 0:
+        return _failure_evidence(completed, combined_output)
+
+    names = sorted(_extract_environment_names(completed.stdout))
+    displayed_names = ", ".join(names[:20])
+    return f"count={len(names)}; names={displayed_names}"[:500]
+
+
+def _extract_environment_names(output: str) -> list[str]:
+    names: list[str] = []
+
+    for line in output.splitlines():
+        stripped_line = line.strip()
+        if not stripped_line:
+            continue
+
+        if "=" in stripped_line:
+            name = stripped_line.split("=", 1)[0].strip()
+        else:
+            parts = stripped_line.split()
+            name = parts[0] if parts else ""
+
+        if name and name not in {"Name", "----"}:
+            names.append(name)
+
+    return names

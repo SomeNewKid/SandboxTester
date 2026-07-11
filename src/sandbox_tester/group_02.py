@@ -48,7 +48,7 @@ class G02_T01:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell read the known allowed test file.",
-                    evidence=completed.stdout[:500],
+                    evidence=_read_output_evidence(self._text_file, completed.stdout),
                 )
 
             return InvocationResult(
@@ -71,7 +71,7 @@ class G02_T01:
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary="Python filesystem API read the known allowed test file.",
-                evidence=content[:500],
+                evidence=_read_output_evidence(self._text_file, content),
             )
         except Exception as error:
             return InvocationResult(
@@ -119,7 +119,10 @@ class G02_T02:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell listed the current directory,",
-                    evidence=completed.stdout[:500],
+                    evidence=_directory_listing_evidence(
+                        self._working_directory,
+                        completed.stdout,
+                    ),
                 )
 
             return InvocationResult(
@@ -138,12 +141,11 @@ class G02_T02:
     async def run_tool(self) -> InvocationResult:
         try:
             entries = list(self._working_directory.iterdir())
-            names = [entry.name for entry in entries]
 
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary="Python filesystem API listed the current directory.",
-                evidence=", ".join(names[:20]),
+                evidence=_directory_entries_evidence(self._working_directory, entries),
             )
         except Exception as error:
             return InvocationResult(
@@ -192,7 +194,10 @@ class G02_T03:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell listed the parent directory.",
-                    evidence=completed.stdout[:500],
+                    evidence=_directory_listing_evidence(
+                        self._parent_directory,
+                        completed.stdout,
+                    ),
                 )
 
             return InvocationResult(
@@ -211,12 +216,11 @@ class G02_T03:
     async def run_tool(self) -> InvocationResult:
         try:
             entries = list(self._parent_directory.iterdir())
-            names = [entry.name for entry in entries]
 
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary="Python filesystem API listed the parent directory.",
-                evidence=", ".join(names[:20]),
+                evidence=_directory_entries_evidence(self._parent_directory, entries),
             )
         except PermissionError as error:
             return InvocationResult(
@@ -362,7 +366,7 @@ class G02_T05:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell read the hidden dot file.",
-                    evidence=completed.stdout[:500],
+                    evidence=_read_output_evidence(self._hidden_file, completed.stdout),
                 )
 
             return InvocationResult(
@@ -385,7 +389,7 @@ class G02_T05:
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary="Python filesystem API read the hidden dot file.",
-                evidence=content[:500],
+                evidence=_read_output_evidence(self._hidden_file, content),
             )
         except PermissionError as error:
             return InvocationResult(
@@ -439,7 +443,10 @@ class G02_T06:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell listed the runtime user directory.",
-                    evidence=completed.stdout[:500],
+                    evidence=_directory_listing_evidence(
+                        self._runtime_user_directory,
+                        completed.stdout,
+                    ),
                 )
 
             return InvocationResult(
@@ -458,12 +465,14 @@ class G02_T06:
     async def run_tool(self) -> InvocationResult:
         try:
             entries = list(self._runtime_user_directory.iterdir())
-            names = [entry.name for entry in entries]
 
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary="Python filesystem API listed the runtime user directory.",
-                evidence=", ".join(names[:20]),
+                evidence=_directory_entries_evidence(
+                    self._runtime_user_directory,
+                    entries,
+                ),
             )
         except PermissionError as error:
             return InvocationResult(
@@ -518,7 +527,10 @@ class G02_T07:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell read the project application configuration file.",
-                    evidence=completed.stdout[:500],
+                    evidence=_read_output_evidence(
+                        self._config_file,
+                        completed.stdout,
+                    ),
                 )
 
             return InvocationResult(
@@ -544,7 +556,7 @@ class G02_T07:
                     "Python filesystem API read the project application "
                     "configuration file."
                 ),
-                evidence=content[:500],
+                evidence=_read_output_evidence(self._config_file, content),
             )
         except PermissionError as error:
             return InvocationResult(
@@ -598,7 +610,10 @@ class G02_T08:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell listed the runtime temporary directory.",
-                    evidence=completed.stdout[:500],
+                    evidence=_directory_listing_evidence(
+                        self._runtime_temp_directory,
+                        completed.stdout,
+                    ),
                 )
 
             return InvocationResult(
@@ -617,12 +632,14 @@ class G02_T08:
     async def run_tool(self) -> InvocationResult:
         try:
             entries = list(self._runtime_temp_directory.iterdir())
-            names = [entry.name for entry in entries]
 
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary="Python filesystem API listed the runtime temporary directory.",
-                evidence=", ".join(names[:20]),
+                evidence=_directory_entries_evidence(
+                    self._runtime_temp_directory,
+                    entries,
+                ),
             )
         except PermissionError as error:
             return InvocationResult(
@@ -683,7 +700,10 @@ class G02_T09:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell listed the mounted/shared directory.",
-                    evidence=completed.stdout[:500],
+                    evidence=_directory_listing_evidence(
+                        self._mounted_shared_directory,
+                        completed.stdout,
+                    ),
                 )
 
             return InvocationResult(
@@ -708,12 +728,14 @@ class G02_T09:
 
         try:
             entries = list(self._mounted_shared_directory.iterdir())
-            names = [entry.name for entry in entries]
 
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary="Python filesystem API listed the mounted/shared directory.",
-                evidence=", ".join(names[:20]),
+                evidence=_directory_entries_evidence(
+                    self._mounted_shared_directory,
+                    entries,
+                ),
             )
         except PermissionError as error:
             return InvocationResult(
@@ -782,7 +804,7 @@ class G02_T10:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell read the known denied test file.",
-                    evidence=completed.stdout[:500],
+                    evidence=_read_output_evidence(self._text_file, completed.stdout),
                 )
 
             return InvocationResult(
@@ -811,7 +833,7 @@ class G02_T10:
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary="Python filesystem API read the known denied test file.",
-                evidence=content[:500],
+                evidence=_read_output_evidence(self._text_file, content),
             )
         except PermissionError as error:
             return InvocationResult(
@@ -962,7 +984,7 @@ class G02_T12:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell read the hidden dot file in the denied directory.",
-                    evidence=completed.stdout[:500],
+                    evidence=_read_output_evidence(self._hidden_file, completed.stdout),
                 )
 
             return InvocationResult(
@@ -991,7 +1013,7 @@ class G02_T12:
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary="Python filesystem API read the denied directory hidden file.",
-                evidence=content[:500],
+                evidence=_read_output_evidence(self._hidden_file, content),
             )
         except PermissionError as error:
             return InvocationResult(
@@ -1027,6 +1049,19 @@ class G02_T12:
             timeout=10,
             check=False,
         )
+
+
+def _read_output_evidence(path: Path, content: str) -> str:
+    return f"path={path}; bytes_read={len(content.encode('utf-8', errors='replace'))}"
+
+
+def _directory_listing_evidence(path: Path, output: str) -> str:
+    entries = [line for line in output.splitlines() if line.strip()]
+    return f"path={path}; entry_count={len(entries)}"
+
+
+def _directory_entries_evidence(path: Path, entries: list[Path]) -> str:
+    return f"path={path}; entry_count={len(entries)}"
 
 
 _g24_NO_SHELL_CANDIDATE_EXIT_CODE = 127
@@ -1779,10 +1814,10 @@ for path in {paths}; do
         denied=1
         continue
     fi
-    sample=$(ls -A "$path" 2>/dev/null | head -n 5 | paste -sd, -)
+    entry_count=$(ls -A "$path" 2>/dev/null | wc -l)
     status=$?
     if [ "$status" -eq 0 ]; then
-        evidence="${{evidence}}$path:readable:sample=[$sample];"
+        evidence="${{evidence}}$path:readable:entry_count=$entry_count;"
     else
         evidence="${{evidence}}$path:denied;"
         denied=1
@@ -1883,23 +1918,10 @@ bind_like_count=$(
         count += 1
     } END { print count + 0 }' /proc/self/mountinfo
 )
-sample=$(awk '{
-    separator = 0
-    for (i = 1; i <= NF; i++) {
-        if ($i == "-") {
-            separator = i
-            break
-        }
-    }
-    if (separator > 0) {
-        print $5 ":" $(separator + 1) ":" $(separator + 2) ":" $6
-    }
-}' /proc/self/mountinfo | head -n 8 | paste -sd, -)
-printf 'mount_count=%s; rw_option_count=%s; bind_like_count=%s; sample=[%s]\\n' \
+printf 'mount_count=%s; rw_option_count=%s; bind_like_count=%s\\n' \
     "$mount_count" \
     "$rw_count" \
-    "$bind_like_count" \
-    "$sample"
+    "$bind_like_count"
 """
     return ["sh", "-c", script]
 
@@ -1921,10 +1943,10 @@ for root in {paths}; do
         size=$(wc -c < "$root" 2>/dev/null || true)
         if [ -n "$size" ]; then
             readable=$((readable + 1))
-            evidence="${{evidence}}$root:file:size=$size;"
+            evidence="${{evidence}}file:readable;"
         else
             denied=$((denied + 1))
-            evidence="${{evidence}}$root:file:denied;"
+            evidence="${{evidence}}file:denied;"
         fi
         continue
     fi
@@ -1934,10 +1956,10 @@ for root in {paths}; do
             size=$(wc -c < "$file" 2>/dev/null || true)
             if [ -n "$size" ]; then
                 readable=$((readable + 1))
-                evidence="${{evidence}}$file:file:size=$size;"
+                evidence="${{evidence}}file:readable;"
             else
                 denied=$((denied + 1))
-                evidence="${{evidence}}$file:file:denied;"
+                evidence="${{evidence}}file:denied;"
             fi
         done <<EOF
 $(find "$root" -maxdepth 3 -type f 2>/dev/null)
@@ -1999,8 +2021,8 @@ def _g24_read_surface_directories_with_python() -> tuple[bool, str]:
             continue
 
         try:
-            sample = [child.name for child in list(path.iterdir())[:5]]
-            entries.append(f"{path}:readable:sample=[{','.join(sample)}]")
+            entry_count = sum(1 for _ in path.iterdir())
+            entries.append(f"{path}:readable:entry_count={entry_count}")
         except PermissionError:
             entries.append(f"{path}:denied")
             all_readable = False
@@ -2033,12 +2055,12 @@ def _g24_read_service_account_secret_metadata_with_python() -> tuple[Outcome, st
 
     for path in candidates:
         try:
-            size = path.stat().st_size
+            path.stat()
             readable_count += 1
-            entries.append(f"{path}:file:size={size}")
+            entries.append("file:readable")
         except PermissionError:
             denied_count += 1
-            entries.append(f"{path}:file:denied")
+            entries.append("file:denied")
 
     evidence = (
         "present=True; "
@@ -2071,25 +2093,11 @@ def _g24_detect_mount_surfaces_with_python() -> str:
         if _g24_is_bind_like_mount(mount):
             bind_like_mounts.append(mount)
 
-    sample_mounts = bind_like_mounts[:8]
-
-    if not sample_mounts:
-        sample_mounts = mounts[:8]
-
-    sample = ",".join(
-        (
-            f"{mount['mount_point']}:{mount['filesystem_type']}:"
-            f"{mount['mount_source']}:{mount['options']}"
-        )
-        for mount in sample_mounts
-    )
-
     return (
         f"mount_count={len(mounts)}; "
         f"rw_option_count={rw_option_count}; "
         f"writable_mountpoint_count={writable_mountpoint_count}; "
-        f"bind_like_count={len(bind_like_mounts)}; "
-        f"sample=[{sample}]"
+        f"bind_like_count={len(bind_like_mounts)}"
     )
 
 
@@ -2277,6 +2285,8 @@ class _AlternatePathAttempt:
     bypass_class: str
     command_family: str
     command: list[str]
+    target_path: Path
+    evidence_kind: str
 
 
 def _build_file_read_alternate_attempts(
@@ -2293,6 +2303,8 @@ def _build_file_read_alternate_attempts(
                 bypass_class="alternate_path",
                 command_family="cmd/type",
                 command=["cmd", "/c", "type", _windows_extended_path(path)],
+                target_path=path,
+                evidence_kind="file_read",
             )
         )
         attempts.append(
@@ -2308,6 +2320,8 @@ def _build_file_read_alternate_attempts(
                     "-Command",
                     f"Get-Content -LiteralPath {_quote_powershell_string(str(path))}",
                 ],
+                target_path=path,
+                evidence_kind="file_read",
             )
         )
         return attempts
@@ -2319,6 +2333,8 @@ def _build_file_read_alternate_attempts(
             bypass_class="alternate_path",
             command_family="cat",
             command=["cat", _linux_proc_root_path(path)],
+            target_path=path,
+            evidence_kind="file_read",
         )
     )
     attempts.append(
@@ -2332,6 +2348,8 @@ def _build_file_read_alternate_attempts(
                 "-c",
                 (f"exec 3< {shlex.quote(str(path))} && cat /proc/$$/fd/3"),
             ],
+            target_path=path,
+            evidence_kind="file_read",
         )
     )
     attempts.append(
@@ -2341,6 +2359,8 @@ def _build_file_read_alternate_attempts(
             bypass_class="alternate_command",
             command_family="sed",
             command=["sed", "-n", "1,200p", str(path)],
+            target_path=path,
+            evidence_kind="file_read",
         )
     )
     return attempts
@@ -2358,6 +2378,8 @@ def _build_metadata_read_alternate_attempts(
                 bypass_class="alternate_path",
                 command_family="cmd/dir",
                 command=["cmd", "/c", "dir", _windows_extended_path(path)],
+                target_path=path,
+                evidence_kind="metadata",
             ),
             _AlternatePathAttempt(
                 id="A02",
@@ -2376,6 +2398,8 @@ def _build_metadata_read_alternate_attempts(
                         "LastWriteTime,Attributes"
                     ),
                 ],
+                target_path=path,
+                evidence_kind="metadata",
             ),
         ]
 
@@ -2386,6 +2410,8 @@ def _build_metadata_read_alternate_attempts(
             bypass_class="alternate_path",
             command_family="ls",
             command=["ls", "-l", _linux_proc_root_path(path)],
+            target_path=path,
+            evidence_kind="metadata",
         ),
         _AlternatePathAttempt(
             id="A02",
@@ -2393,6 +2419,8 @@ def _build_metadata_read_alternate_attempts(
             bypass_class="alternate_command",
             command_family="stat",
             command=["stat", str(path)],
+            target_path=path,
+            evidence_kind="metadata",
         ),
     ]
 
@@ -2409,6 +2437,8 @@ def _build_directory_listing_alternate_attempts(
                 bypass_class="alternate_path",
                 command_family="cmd/dir",
                 command=["cmd", "/c", "dir", _windows_extended_path(path)],
+                target_path=path,
+                evidence_kind="directory_listing",
             ),
             _AlternatePathAttempt(
                 id="A02",
@@ -2425,6 +2455,8 @@ def _build_directory_listing_alternate_attempts(
                         f"{_quote_powershell_string(str(path))}"
                     ),
                 ],
+                target_path=path,
+                evidence_kind="directory_listing",
             ),
         ]
 
@@ -2435,6 +2467,8 @@ def _build_directory_listing_alternate_attempts(
             bypass_class="alternate_path",
             command_family="ls",
             command=["ls", _linux_proc_root_path(path)],
+            target_path=path,
+            evidence_kind="directory_listing",
         ),
         _AlternatePathAttempt(
             id="A02",
@@ -2442,6 +2476,8 @@ def _build_directory_listing_alternate_attempts(
             bypass_class="alternate_command",
             command_family="find",
             command=["find", str(path), "-maxdepth", "1", "-mindepth", "1", "-print"],
+            target_path=path,
+            evidence_kind="directory_listing",
         ),
     ]
 
@@ -2504,7 +2540,7 @@ def _run_path_alternate_attempt(
             outcome=outcome,
             bypass_class=attempt.bypass_class,
             command_family=attempt.command_family,
-            evidence=_alternate_evidence(completed, combined_output),
+            evidence=_alternate_evidence(attempt, completed, combined_output),
         )
     except FileNotFoundError as error:
         return _alternate_exception_result(
@@ -2538,9 +2574,20 @@ def _alternate_exception_result(
 
 
 def _alternate_evidence(
+    attempt: _AlternatePathAttempt,
     completed: subprocess.CompletedProcess[str],
     combined_output: str,
 ) -> str:
+    if completed.returncode == 0:
+        if attempt.evidence_kind == "file_read":
+            return _read_output_evidence(attempt.target_path, completed.stdout)
+
+        if attempt.evidence_kind == "directory_listing":
+            return _directory_listing_evidence(attempt.target_path, completed.stdout)
+
+        if attempt.evidence_kind == "metadata":
+            return f"path={attempt.target_path}; metadata_read=True"
+
     if combined_output:
         return combined_output[:500]
 

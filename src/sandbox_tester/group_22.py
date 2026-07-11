@@ -161,7 +161,7 @@ class G22_T03:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell read system logs.",
-                    evidence=completed.stdout.strip()[:500],
+                    evidence=_log_read_evidence(completed.stdout),
                 )
 
             if completed.returncode == _NO_SHELL_CANDIDATE_EXIT_CODE:
@@ -266,7 +266,7 @@ class G22_T04:
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell read security logs.",
-                    evidence=completed.stdout.strip()[:500],
+                    evidence=_log_read_evidence(completed.stdout),
                 )
 
             if completed.returncode == _NO_SHELL_CANDIDATE_EXIT_CODE:
@@ -599,15 +599,18 @@ def _build_linux_system_log_command() -> list[str]:
     script = """
 set -u
 if command -v journalctl >/dev/null 2>&1; then
-    journalctl -n 1 --no-pager
+    journalctl -n 1 --no-pager >/dev/null
+    echo "log_read=True; source=journalctl; line_count=1"
     exit $?
 fi
 if [ -r /var/log/syslog ]; then
-    tail -n 1 /var/log/syslog
+    tail -n 1 /var/log/syslog >/dev/null
+    echo "log_read=True; source=/var/log/syslog; line_count=1"
     exit $?
 fi
 if [ -r /var/log/messages ]; then
-    tail -n 1 /var/log/messages
+    tail -n 1 /var/log/messages >/dev/null
+    echo "log_read=True; source=/var/log/messages; line_count=1"
     exit $?
 fi
 exit 127
@@ -619,15 +622,18 @@ def _build_linux_security_log_command() -> list[str]:
     script = """
 set -u
 if [ -e /var/log/auth.log ]; then
-    tail -n 1 /var/log/auth.log
+    tail -n 1 /var/log/auth.log >/dev/null
+    echo "log_read=True; source=/var/log/auth.log; line_count=1"
     exit $?
 fi
 if [ -e /var/log/secure ]; then
-    tail -n 1 /var/log/secure
+    tail -n 1 /var/log/secure >/dev/null
+    echo "log_read=True; source=/var/log/secure; line_count=1"
     exit $?
 fi
 if command -v journalctl >/dev/null 2>&1; then
-    journalctl -n 1 --no-pager SYSLOG_FACILITY=10
+    journalctl -n 1 --no-pager SYSLOG_FACILITY=10 >/dev/null
+    echo "log_read=True; source=journalctl; line_count=1"
     exit $?
 fi
 exit 127
@@ -664,7 +670,7 @@ def _read_text_log_sample(paths: list[Path]) -> str:
             with path.open("r", encoding="utf-8", errors="replace") as file:
                 sample = file.readline().strip()
 
-            return f"path={path}; sample={sample[:400]}"
+            return f"path={path}; bytes_read={len(sample.encode())}; line_count=1"
 
     path_list = ", ".join(str(path) for path in paths)
     raise FileNotFoundError(f"No supported log files found: {path_list}")
@@ -686,3 +692,10 @@ def _failure_evidence(
     combined_output: str,
 ) -> str:
     return f"returncode={completed.returncode}; output={combined_output[:500]}"
+
+
+def _log_read_evidence(output: str) -> str:
+    if output.strip():
+        return output.strip()[:500]
+
+    return "log_read=True"

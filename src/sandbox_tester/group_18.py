@@ -966,7 +966,7 @@ def _run_identity_alternate_attempt(
             outcome=outcome,
             bypass_class=attempt.bypass_class,
             command_family=attempt.command_family,
-            evidence=_failure_evidence(completed, combined_output),
+            evidence=_identity_alternate_evidence(attempt, completed, combined_output),
         )
     except FileNotFoundError as error:
         return _alternate_exception_result(
@@ -1005,6 +1005,24 @@ def _no_supported_alternate_surface(summary: str) -> AlternateInvocationResult:
         summary=summary,
         attempts=[],
     )
+
+
+def _identity_alternate_evidence(
+    attempt: _AlternateIdentityAttempt,
+    completed: subprocess.CompletedProcess[str],
+    combined_output: str,
+) -> str:
+    if completed.returncode != 0:
+        return _failure_evidence(completed, combined_output)
+
+    if attempt.command_family in {"quser", "qwinsta", "w", "users"}:
+        session_rows = len([line for line in completed.stdout.splitlines() if line])
+        return f"session_rows={session_rows}"
+
+    if attempt.command_family in {"cmd/cmdkey", "secret-tool"}:
+        return "credential_query_completed=True"
+
+    return _failure_evidence(completed, combined_output)
 
 
 def _credential_store_is_available(operating_system: OperatingSystem) -> bool:
