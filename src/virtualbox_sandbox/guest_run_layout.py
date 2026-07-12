@@ -11,6 +11,8 @@ import paramiko
 from .models import GuestRunLayout
 
 _REMOTE_RUN_ROOT = "/tmp/sandbox-tester"
+_ALLOWED_CHILD_DIRECTORY = "allowed"
+_DENIED_CHILD_DIRECTORY = "denied"
 _ALLOWED_FILE_NAME = "allowed.txt"
 _DENIED_FILE_NAME = "denied.txt"
 _ALLOWED_FILE_CONTENT = "This is a test file for the allowed directory."
@@ -34,7 +36,15 @@ def create_sandbox_tester_run_layout(
     """Create a disposable guest filesystem layout for Sandbox Tester."""
     run_directory = posixpath.join(_REMOTE_RUN_ROOT, f"run-{uuid.uuid4().hex}")
     allowed_directory = posixpath.join(run_directory, "allowed")
+    allowed_child_directory = posixpath.join(
+        allowed_directory,
+        _ALLOWED_CHILD_DIRECTORY,
+    )
     denied_directory = posixpath.join(run_directory, "denied")
+    denied_child_directory = posixpath.join(
+        denied_directory,
+        _DENIED_CHILD_DIRECTORY,
+    )
     output_directory = posixpath.join(run_directory, "output")
     config_path = posixpath.join(run_directory, "config.json")
     config_json = _build_config_json(
@@ -56,16 +66,18 @@ def create_sandbox_tester_run_layout(
 
     with client.open_sftp() as sftp:
         _mkdir_remote_directory(sftp, allowed_directory)
+        _mkdir_remote_directory(sftp, allowed_child_directory)
         _mkdir_remote_directory(sftp, denied_directory)
+        _mkdir_remote_directory(sftp, denied_child_directory)
         _mkdir_remote_directory(sftp, output_directory)
         _write_remote_text(
             sftp,
-            posixpath.join(allowed_directory, _ALLOWED_FILE_NAME),
+            posixpath.join(allowed_child_directory, _ALLOWED_FILE_NAME),
             _ALLOWED_FILE_CONTENT,
         )
         _write_remote_text(
             sftp,
-            posixpath.join(denied_directory, _DENIED_FILE_NAME),
+            posixpath.join(denied_child_directory, _DENIED_FILE_NAME),
             _DENIED_FILE_CONTENT,
         )
         _write_remote_text(sftp, config_path, layout.config_json)

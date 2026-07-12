@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 import time
 from dataclasses import dataclass, replace
@@ -12,11 +13,12 @@ import paramiko
 from .agent_profiles import get_python_agent_profile
 from .guest_run_layout import create_sandbox_tester_run_layout
 from .guest_script_runner import GuestScriptRunner
-from .models import GuestRunLayout, GuestScriptResult
+from .models import GuestRunLayout, GuestScriptResult, PythonAgentProfile
 
 _SSH_CONNECT_TIMEOUT_SECONDS = 180
 _SSH_POLL_INTERVAL_SECONDS = 2
 _SSH_BANNER_TIMEOUT_SECONDS = 5
+_LOCAL_ENVIRONMENT_VALUE = "[local]"
 _HELLO_WORLD_SCRIPT = (
     "import json\n"
     "import platform\n"
@@ -85,7 +87,10 @@ class VirtualMachineSetup:
             runner = GuestScriptRunner(client)
             if self._agent_name is not None:
                 profile = get_python_agent_profile(self._agent_name)
-                environment_variables = self._prepare_agent_environment(client)
+                environment_variables = self._prepare_agent_environment(
+                    client,
+                    profile,
+                )
                 result = runner.run_python_agent(profile, environment_variables)
                 return self._download_agent_artifacts(client, result)
 
@@ -97,9 +102,12 @@ class VirtualMachineSetup:
     def _prepare_agent_environment(
         self,
         client: paramiko.SSHClient,
+        profile: PythonAgentProfile,
     ) -> dict[str, str] | None:
+        environment_variables = _resolve_profile_environment_variables(profile)
+
         if self._agent_name != "sandbox_tester":
-            return None
+            return environment_variables or None
 
         layout = create_sandbox_tester_run_layout(
             client,
@@ -107,9 +115,7 @@ class VirtualMachineSetup:
         )
         self._guest_run_layout = layout
         self._write_local_config(layout)
-        environment_variables = {
-            "SANDBOX_TESTER_CONFIG_PATH": layout.config_path,
-        }
+        environment_variables["SANDBOX_TESTER_CONFIG_PATH"] = layout.config_path
 
         if self._agent_verbose:
             environment_variables["SANDBOX_TESTER_VERBOSE"] = "1"
@@ -221,3 +227,20 @@ def _load_script_content(script_path: Path | None) -> str:
         raise ValueError(f"Script path is not a file: {resolved_path}")
 
     return resolved_path.read_text(encoding="utf-8")
+
+
+def _resolve_profile_environment_variables(
+    profile: PythonAgentProfile,
+) -> dict[str, str]:
+    environment_variables: dict[str, str] = {}
+
+    for name, value in profile.environment_variables.items():
+        if value == _LOCAL_ENVIRONMENT_VALUE:
+            local_value = os.environ.get(name)
+            if local_value is not None:
+                environment_variables[name] = local_value
+            continue
+
+        environment_variables[name] = value
+
+    return environment_variables

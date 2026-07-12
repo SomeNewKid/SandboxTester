@@ -72,6 +72,7 @@ class PythonAgentProfile:
     dependencies: list[str]
     entry_script: str
     exclude_patterns: list[str]
+    environment_variables: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

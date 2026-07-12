@@ -24,6 +24,7 @@ from .group_19 import get_group as get_group_19
 from .group_20 import get_group as get_group_20
 from .group_21 import get_group as get_group_21
 from .group_22 import get_group as get_group_22
+from .group_30 import get_group as get_group_30
 from .reporter import TestReporter
 from .testing import (
     CapabilityContext,
@@ -55,6 +56,7 @@ _ENABLED_GROUPS: list[str] = [
     "G20",
     "G21",
     "G22",
+    "G30",
 ]
 
 GROUP_FACTORIES: list[Callable[[CapabilityContext], CapabilityGroup]] = [
@@ -80,6 +82,7 @@ GROUP_FACTORIES: list[Callable[[CapabilityContext], CapabilityGroup]] = [
     get_group_20,
     get_group_21,
     get_group_22,
+    get_group_30,
 ]
 
 

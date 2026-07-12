@@ -28,6 +28,7 @@ def get_profile() -> PythonAgentProfile:
         source_directory=_SANDBOX_TESTER_SOURCE_DIRECTORY,
         package_directory_name="sandbox_tester",
         dependencies=[
+            "openai",
             "paramiko",
             "pillow",
             "pymysql",
@@ -37,4 +38,7 @@ def get_profile() -> PythonAgentProfile:
             "__pycache__",
             "*.pyc",
         ],
+        environment_variables={
+            "OPENAI_API_KEY": "[local]",
+        },
     )
