@@ -6,6 +6,7 @@ dependencies = [
     "openai",
     "paramiko",
     "pillow",
+    "playwright",
     "pymysql",
 ]
 

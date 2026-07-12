@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import posixpath
 import socket
 import time
 from dataclasses import dataclass, replace
@@ -142,6 +143,17 @@ class VirtualMachineSetup:
             return result
 
         report_path = f"{self._guest_run_layout.output_directory}/report.json"
+        screenshot_paths = [
+            f"{self._guest_run_layout.output_directory}/browser_screenshot.png",
+            (
+                f"{self._guest_run_layout.output_directory}/"
+                "playwright_shell_screenshot.png"
+            ),
+            (
+                f"{self._guest_run_layout.output_directory}/"
+                "playwright_tool_screenshot.png"
+            ),
+        ]
         artifacts = dict(result.artifacts)
 
         with client.open_sftp() as sftp:
@@ -157,7 +169,11 @@ class VirtualMachineSetup:
 
                 return result
 
+            screenshot_artifacts = _read_screenshot_artifacts(sftp, screenshot_paths)
+
         artifacts["report.json"] = report_bytes.decode("utf-8", errors="replace")
+        artifacts.update(screenshot_artifacts)
+
         return replace(result, artifacts=artifacts)
 
     def _wait_for_ssh(self) -> paramiko.SSHClient:
@@ -227,6 +243,24 @@ def _load_script_content(script_path: Path | None) -> str:
         raise ValueError(f"Script path is not a file: {resolved_path}")
 
     return resolved_path.read_text(encoding="utf-8")
+
+
+def _read_screenshot_artifacts(
+    sftp: paramiko.SFTPClient,
+    screenshot_paths: list[str],
+) -> dict[str, bytes]:
+    artifacts: dict[str, bytes] = {}
+
+    for screenshot_path in screenshot_paths:
+        try:
+            with sftp.file(screenshot_path, "rb") as screenshot_file:
+                screenshot_bytes = screenshot_file.read()
+        except OSError:
+            continue
+
+        artifacts[posixpath.basename(screenshot_path)] = screenshot_bytes
+
+    return artifacts
 
 
 def _resolve_profile_environment_variables(

@@ -22,6 +22,9 @@ async def run_from_files(
     """Run tests from a serialized capability context and write output files."""
     output_directory.mkdir(parents=True, exist_ok=True)
     context = read_capability_context(context_path)
+    if context.output_directory != output_directory:
+        context = dataclasses.replace(context, output_directory=output_directory)
+
     results = await run_all_groups(context, reporter)
 
     report_path = output_directory / "report.json"

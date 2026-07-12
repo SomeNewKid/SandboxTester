@@ -72,6 +72,7 @@ class PythonAgentProfile:
     dependencies: list[str]
     entry_script: str
     exclude_patterns: list[str]
+    post_install_commands: list[str] = field(default_factory=list)
     environment_variables: dict[str, str] = field(default_factory=dict)
 
 
@@ -119,4 +120,4 @@ class GuestScriptResult:
     exit_code: int
     stdout: str
     stderr: str
-    artifacts: dict[str, str] = field(default_factory=dict)
+    artifacts: dict[str, str | bytes] = field(default_factory=dict)

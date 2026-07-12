@@ -57,6 +57,10 @@ class GuestScriptRunner:
         self._write_remote_script(script_path, profile.entry_script)
         self._create_virtual_environment(venv_path)
         self._install_dependencies(python_executable, profile.dependencies)
+        self._run_post_install_commands(
+            python_executable,
+            profile.post_install_commands,
+        )
         return self._execute_remote_script(
             script_path,
             source_path,
@@ -208,6 +212,19 @@ class GuestScriptRunner:
             self._client,
             f"{quoted_python} -m pip install {quoted_dependencies}",
         )
+
+    def _run_post_install_commands(
+        self,
+        python_executable: str,
+        commands: list[str],
+    ) -> None:
+        if not commands:
+            return
+
+        quoted_python = shlex.quote(python_executable)
+        for command in commands:
+            resolved_command = command.format(python=quoted_python)
+            _run_remote_command(self._client, resolved_command)
 
 
 def _create_remote_script_path() -> str:

@@ -33,6 +33,14 @@ function Invoke-Pip {
     }
 }
 
+function Invoke-Playwright {
+    & $VenvPython -m playwright @args
+    if ($LASTEXITCODE -ne 0) {
+        throw "playwright command failed with exit code $LASTEXITCODE."
+    }
+}
+
 Invoke-Pip install --index-url https://pypi.org/simple --upgrade pip
 Invoke-Pip install --index-url https://pypi.org/simple keyring artifacts-keyring
 Invoke-Pip install --editable ".[dev]"
+Invoke-Playwright install chromium

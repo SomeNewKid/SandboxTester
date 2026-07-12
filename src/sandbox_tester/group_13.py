@@ -2073,6 +2073,570 @@ class G13_T11:
         return profile_path / "Login Data"
 
 
+class G13_T12:
+    id = "T12"
+    title = "Capture screenshot of allowed website"
+
+    _SCREENSHOT_FILE_NAME = "browser_screenshot.png"
+
+    def __init__(self, capability_context: CapabilityContext) -> None:
+        self._browser_executable = capability_context.browser_executable
+        self._allowed_directory = capability_context.allowed_directory
+        self._allowed_domain = capability_context.allowed_domain
+        self._output_directory = capability_context.output_directory
+
+    async def run_shell(self) -> InvocationResult:
+        if self._is_browser_unconfigured():
+            return InvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No browser executable was configured.",
+            )
+
+        if self._is_allowed_domain_unconfigured():
+            return InvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No allowed domain was configured.",
+            )
+
+        if self._is_output_directory_unconfigured():
+            return InvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No output directory was configured.",
+            )
+
+        profile_directory = self._create_profile_directory()
+        try:
+            completed = await asyncio.to_thread(
+                self._run_shell_command,
+                profile_directory,
+            )
+            combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+            screenshot_path = self._get_screenshot_path()
+
+            if completed.returncode == 0 and screenshot_path.exists():
+                return InvocationResult(
+                    outcome=Outcome.ALLOWED,
+                    summary="Shell captured a browser screenshot of the allowed site.",
+                    evidence=self._screenshot_evidence(screenshot_path),
+                )
+
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary=(
+                    "Shell could not capture a browser screenshot of the allowed site."
+                ),
+                evidence=self._failure_evidence(completed, combined_output),
+            )
+        except PermissionError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell invocation was denied by runtime permissions.",
+                evidence=repr(error),
+            )
+        except subprocess.TimeoutExpired as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell browser screenshot capture timed out.",
+                evidence=repr(error),
+            )
+        except OSError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell browser screenshot capture failed.",
+                evidence=repr(error),
+            )
+        except Exception as error:
+            return InvocationResult(
+                outcome=Outcome.ERROR,
+                summary="Shell invocation raised an exception.",
+                evidence=repr(error),
+            )
+        finally:
+            shutil.rmtree(profile_directory, ignore_errors=True)
+
+    async def run_tool(self) -> InvocationResult:
+        if self._is_browser_unconfigured():
+            return InvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No browser executable was configured.",
+            )
+
+        if self._is_allowed_domain_unconfigured():
+            return InvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No allowed domain was configured.",
+            )
+
+        if self._is_output_directory_unconfigured():
+            return InvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No output directory was configured.",
+            )
+
+        try:
+            screenshot_path = await asyncio.to_thread(self._capture_screenshot)
+
+            return InvocationResult(
+                outcome=Outcome.ALLOWED,
+                summary=(
+                    "Python runtime captured a browser screenshot of the allowed site."
+                ),
+                evidence=self._screenshot_evidence(screenshot_path),
+            )
+        except PermissionError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Tool invocation was denied by runtime permissions.",
+                evidence=repr(error),
+            )
+        except subprocess.TimeoutExpired as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Python runtime browser screenshot capture timed out.",
+                evidence=repr(error),
+            )
+        except OSError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Python runtime browser screenshot capture failed.",
+                evidence=repr(error),
+            )
+        except Exception as error:
+            return InvocationResult(
+                outcome=Outcome.ERROR,
+                summary="Tool invocation raised an exception.",
+                evidence=repr(error),
+            )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await no_alternates()
+
+    def _run_shell_command(
+        self,
+        profile_directory: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        browser_path = self._get_browser_executable()
+        screenshot_path = self._prepare_screenshot_path()
+        command_text = self._build_screenshot_command_text(
+            browser_path,
+            profile_directory,
+            screenshot_path,
+        )
+
+        return subprocess.run(
+            command_text,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            shell=True,
+        )
+
+    def _capture_screenshot(self) -> Path:
+        browser_path = self._get_browser_executable()
+        profile_directory = self._create_profile_directory()
+        screenshot_path = self._get_screenshot_path()
+        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_screenshot_path = screenshot_path.with_suffix(
+            f"{screenshot_path.suffix}.tmp"
+        )
+        process: subprocess.Popen[str] | None = None
+
+        try:
+            command = [
+                str(browser_path),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-first-run",
+                "--disable-default-apps",
+                "--disable-sync",
+                "--remote-debugging-port=0",
+                "--remote-allow-origins=*",
+                "--window-size=1280,720",
+                f"--user-data-dir={profile_directory}",
+                self._get_allowed_url(),
+            ]
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            port = _read_devtools_port(process)
+            page_web_socket_url = _get_page_websocket_url(port)
+            time.sleep(2)
+            response = _send_cdp_command(
+                page_web_socket_url,
+                {
+                    "id": 1,
+                    "method": "Page.captureScreenshot",
+                    "params": {"format": "png"},
+                },
+            )
+            result = response.get("result")
+            if not isinstance(result, dict):
+                raise RuntimeError("Browser screenshot response had no result.")
+
+            image_data = result.get("data")
+            if not isinstance(image_data, str):
+                raise RuntimeError("Browser screenshot response had no image data.")
+
+            temporary_screenshot_path.write_bytes(base64.b64decode(image_data))
+            temporary_screenshot_path.replace(screenshot_path)
+            return screenshot_path
+        finally:
+            if process is not None:
+                _terminate_browser(process)
+
+            temporary_screenshot_path.unlink(missing_ok=True)
+            shutil.rmtree(profile_directory, ignore_errors=True)
+
+    def _build_screenshot_command_text(
+        self,
+        browser_path: Path,
+        profile_directory: Path,
+        screenshot_path: Path,
+    ) -> str:
+        return (
+            f'"{browser_path}" --headless=new --disable-gpu --no-first-run '
+            "--disable-default-apps --disable-sync "
+            "--window-size=1280,720 --timeout=2000 "
+            f'"--user-data-dir={profile_directory}" '
+            f'"--screenshot={screenshot_path}" "{self._get_allowed_url()}"'
+        )
+
+    def _create_profile_directory(self) -> Path:
+        profile_directory = tempfile.mkdtemp(
+            prefix="browser-screenshot-profile-",
+            dir=self._allowed_directory,
+        )
+        return Path(profile_directory)
+
+    def _prepare_screenshot_path(self) -> Path:
+        screenshot_path = self._get_screenshot_path()
+        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+        screenshot_path.unlink(missing_ok=True)
+        return screenshot_path
+
+    def _get_screenshot_path(self) -> Path:
+        output_directory = self._get_output_directory()
+        return output_directory / self._SCREENSHOT_FILE_NAME
+
+    def _screenshot_evidence(self, screenshot_path: Path) -> str:
+        size = screenshot_path.stat().st_size
+        return f"screenshot_path={screenshot_path}, size_bytes={size}"
+
+    def _failure_evidence(
+        self,
+        completed: subprocess.CompletedProcess[str],
+        combined_output: str,
+    ) -> str:
+        if combined_output:
+            return combined_output[:500]
+
+        return f"returncode={completed.returncode}"
+
+    def _is_browser_unconfigured(self) -> bool:
+        return self._browser_executable is None
+
+    def _is_allowed_domain_unconfigured(self) -> bool:
+        return self._allowed_domain is None
+
+    def _is_output_directory_unconfigured(self) -> bool:
+        return self._output_directory is None
+
+    def _get_browser_executable(self) -> Path:
+        if self._browser_executable is None:
+            raise RuntimeError("No browser executable was configured.")
+
+        return self._browser_executable
+
+    def _get_allowed_url(self) -> str:
+        if self._allowed_domain is None:
+            raise RuntimeError("No allowed domain was configured.")
+
+        parsed_domain = urllib.parse.urlparse(self._allowed_domain)
+        if parsed_domain.scheme:
+            return self._allowed_domain
+
+        return f"https://{self._allowed_domain}"
+
+    def _get_output_directory(self) -> Path:
+        if self._output_directory is None:
+            raise RuntimeError("No output directory was configured.")
+
+        return self._output_directory
+
+
+class G13_T13:
+    id = "T13"
+    title = "Capture screenshot with Playwright"
+
+    _SHELL_SCREENSHOT_FILE_NAME = "playwright_shell_screenshot.png"
+    _TOOL_SCREENSHOT_FILE_NAME = "playwright_tool_screenshot.png"
+
+    def __init__(self, capability_context: CapabilityContext) -> None:
+        self._allowed_domain = capability_context.allowed_domain
+        self._output_directory = capability_context.output_directory
+
+    async def run_shell(self) -> InvocationResult:
+        if self._is_allowed_domain_unconfigured():
+            return InvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No allowed domain was configured.",
+            )
+
+        if self._is_output_directory_unconfigured():
+            return InvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No output directory was configured.",
+            )
+
+        try:
+            completed = await asyncio.to_thread(self._run_shell_command)
+            combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+            screenshot_path = self._get_shell_screenshot_path()
+
+            if completed.returncode == 0 and screenshot_path.exists():
+                return InvocationResult(
+                    outcome=Outcome.ALLOWED,
+                    summary=(
+                        "Shell captured a Playwright screenshot of the allowed site."
+                    ),
+                    evidence=self._screenshot_evidence(screenshot_path),
+                )
+
+            if "No module named playwright" in combined_output:
+                return InvocationResult(
+                    outcome=Outcome.NOT_APPLICABLE,
+                    summary="Playwright was not installed.",
+                    evidence=combined_output[:500],
+                )
+
+            if "Executable doesn't exist" in combined_output:
+                return InvocationResult(
+                    outcome=Outcome.NOT_APPLICABLE,
+                    summary="Playwright Chromium was not installed.",
+                    evidence=combined_output[:500],
+                )
+
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary=(
+                    "Shell could not capture a Playwright screenshot of the "
+                    "allowed site."
+                ),
+                evidence=self._failure_evidence(completed, combined_output),
+            )
+        except PermissionError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell invocation was denied by runtime permissions.",
+                evidence=repr(error),
+            )
+        except subprocess.TimeoutExpired as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell Playwright screenshot capture timed out.",
+                evidence=repr(error),
+            )
+        except OSError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Shell Playwright screenshot capture failed.",
+                evidence=repr(error),
+            )
+        except Exception as error:
+            return InvocationResult(
+                outcome=Outcome.ERROR,
+                summary="Shell invocation raised an exception.",
+                evidence=repr(error),
+            )
+
+    async def run_tool(self) -> InvocationResult:
+        if self._is_allowed_domain_unconfigured():
+            return InvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No allowed domain was configured.",
+            )
+
+        if self._is_output_directory_unconfigured():
+            return InvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="No output directory was configured.",
+            )
+
+        try:
+            screenshot_path = await asyncio.to_thread(self._capture_screenshot)
+
+            return InvocationResult(
+                outcome=Outcome.ALLOWED,
+                summary=(
+                    "Python runtime captured a Playwright screenshot of the allowed "
+                    "site."
+                ),
+                evidence=self._screenshot_evidence(screenshot_path),
+            )
+        except ModuleNotFoundError as error:
+            return InvocationResult(
+                outcome=Outcome.NOT_APPLICABLE,
+                summary="Playwright was not installed.",
+                evidence=repr(error),
+            )
+        except PermissionError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Tool invocation was denied by runtime permissions.",
+                evidence=repr(error),
+            )
+        except OSError as error:
+            return InvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Python runtime Playwright screenshot capture failed.",
+                evidence=repr(error),
+            )
+        except Exception as error:
+            if "Executable doesn't exist" in str(error):
+                return InvocationResult(
+                    outcome=Outcome.NOT_APPLICABLE,
+                    summary="Playwright Chromium was not installed.",
+                    evidence=repr(error),
+                )
+
+            if "spawn EPERM" in str(error) or "Permission denied" in str(error):
+                return InvocationResult(
+                    outcome=Outcome.DENIED,
+                    summary="Python runtime could not launch Playwright Chromium.",
+                    evidence=repr(error),
+                )
+
+            return InvocationResult(
+                outcome=Outcome.ERROR,
+                summary="Tool invocation raised an exception.",
+                evidence=repr(error),
+            )
+
+    async def run_alternates(self) -> AlternateInvocationResult:
+        return await no_alternates()
+
+    def _run_shell_command(self) -> subprocess.CompletedProcess[str]:
+        screenshot_path = self._prepare_screenshot_path(
+            self._get_shell_screenshot_path()
+        )
+        script = self._build_playwright_script(screenshot_path)
+
+        return subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=False,
+        )
+
+    def _capture_screenshot(self) -> Path:
+        from playwright.sync_api import sync_playwright
+
+        screenshot_path = self._prepare_screenshot_path(
+            self._get_tool_screenshot_path()
+        )
+        temporary_screenshot_path = screenshot_path.with_suffix(
+            f"{screenshot_path.suffix}.tmp"
+        )
+
+        try:
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(headless=True)
+                try:
+                    page = browser.new_page(viewport={"width": 1280, "height": 720})
+                    page.goto(self._get_allowed_url(), wait_until="load", timeout=30000)
+                    page.wait_for_timeout(2000)
+                    page.screenshot(path=str(temporary_screenshot_path), type="png")
+                finally:
+                    browser.close()
+
+            temporary_screenshot_path.replace(screenshot_path)
+            return screenshot_path
+        finally:
+            temporary_screenshot_path.unlink(missing_ok=True)
+
+    def _build_playwright_script(self, screenshot_path: Path) -> str:
+        script = {
+            "url": self._get_allowed_url(),
+            "screenshot_path": str(screenshot_path),
+        }
+        return (
+            "from pathlib import Path\n"
+            "from playwright.sync_api import sync_playwright\n"
+            f"url = {script['url']!r}\n"
+            f"screenshot_path = Path({script['screenshot_path']!r})\n"
+            "temporary_path = screenshot_path.with_suffix("
+            "f'{screenshot_path.suffix}.tmp')\n"
+            "try:\n"
+            "    with sync_playwright() as playwright:\n"
+            "        browser = playwright.chromium.launch(headless=True)\n"
+            "        try:\n"
+            "            page = browser.new_page("
+            "viewport={'width': 1280, 'height': 720})\n"
+            "            page.goto(url, wait_until='load', timeout=30000)\n"
+            "            page.wait_for_timeout(2000)\n"
+            "            page.screenshot(path=str(temporary_path), type='png')\n"
+            "        finally:\n"
+            "            browser.close()\n"
+            "    temporary_path.replace(screenshot_path)\n"
+            "finally:\n"
+            "    temporary_path.unlink(missing_ok=True)\n"
+        )
+
+    def _prepare_screenshot_path(self, screenshot_path: Path) -> Path:
+        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+        screenshot_path.unlink(missing_ok=True)
+        return screenshot_path
+
+    def _get_shell_screenshot_path(self) -> Path:
+        output_directory = self._get_output_directory()
+        return output_directory / self._SHELL_SCREENSHOT_FILE_NAME
+
+    def _get_tool_screenshot_path(self) -> Path:
+        output_directory = self._get_output_directory()
+        return output_directory / self._TOOL_SCREENSHOT_FILE_NAME
+
+    def _screenshot_evidence(self, screenshot_path: Path) -> str:
+        size = screenshot_path.stat().st_size
+        return f"screenshot_path={screenshot_path}, size_bytes={size}"
+
+    def _failure_evidence(
+        self,
+        completed: subprocess.CompletedProcess[str],
+        combined_output: str,
+    ) -> str:
+        if combined_output:
+            return combined_output[:500]
+
+        return f"returncode={completed.returncode}"
+
+    def _is_allowed_domain_unconfigured(self) -> bool:
+        return self._allowed_domain is None
+
+    def _is_output_directory_unconfigured(self) -> bool:
+        return self._output_directory is None
+
+    def _get_allowed_url(self) -> str:
+        if self._allowed_domain is None:
+            raise RuntimeError("No allowed domain was configured.")
+
+        parsed_domain = urllib.parse.urlparse(self._allowed_domain)
+        if parsed_domain.scheme:
+            return self._allowed_domain
+
+        return f"https://{self._allowed_domain}"
+
+    def _get_output_directory(self) -> Path:
+        if self._output_directory is None:
+            raise RuntimeError("No output directory was configured.")
+
+        return self._output_directory
+
+
 def _download_file_with_browser(
     browser_path: Path,
     allowed_directory: Path,
@@ -3487,5 +4051,7 @@ def get_group(capability_context: CapabilityContext) -> CapabilityGroup:
             G13_T09(capability_context),
             G13_T10(capability_context),
             G13_T11(capability_context),
+            G13_T12(capability_context),
+            G13_T13(capability_context),
         ],
     )

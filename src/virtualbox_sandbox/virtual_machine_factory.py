@@ -33,6 +33,39 @@ _ENABLE_OPENSSH_COMMAND = (
 _FINALIZE_BASE_PACKAGES = [
     "python3-pip",
     "python3-venv",
+    "xvfb",
+    "fonts-noto-color-emoji",
+    "fonts-unifont",
+    "libfontconfig1",
+    "libfreetype6",
+    "xfonts-cyrillic",
+    "xfonts-scalable",
+    "fonts-liberation",
+    "fonts-ipafont-gothic",
+    "fonts-wqy-zenhei",
+    "fonts-tlwg-loma-otf",
+    "fonts-freefont-ttf",
+    "libasound2t64",
+    "libatk-bridge2.0-0t64",
+    "libatk1.0-0t64",
+    "libatspi2.0-0t64",
+    "libcairo2",
+    "libcups2t64",
+    "libdbus-1-3",
+    "libdrm2",
+    "libgbm1",
+    "libglib2.0-0t64",
+    "libnspr4",
+    "libnss3",
+    "libpango-1.0-0",
+    "libx11-6",
+    "libxcb1",
+    "libxcomposite1",
+    "libxdamage1",
+    "libxext6",
+    "libxfixes3",
+    "libxkbcommon0",
+    "libxrandr2",
 ]
 _BASE_SSH_FORWARD_NAME = "sandbox-base-ssh"
 _RUN_VM_NAME_PREFIX = "Sandbox Tester Run"
@@ -42,6 +75,10 @@ _VBOXMANAGE_ENVIRONMENT_VARIABLE = "VBOXMANAGE"
 _ISO_ENVIRONMENT_VARIABLE = "SANDBOX_TESTER_ISO"
 _WINDOWS_VBOXMANAGE_PATH = Path(r"C:\Program Files\Oracle\VirtualBox\VBoxManage.exe")
 _VM_LINE_PATTERN = re.compile(r'^"(?P<name>.*)" \{(?P<uuid>[^}]+)\}$')
+
+
+class _SshNotReadyError(RuntimeError):
+    pass
 
 
 def create_vm_clone(configuration: VirtualBoxConfiguration) -> VmCloneResult:
@@ -404,6 +441,7 @@ def _add_stopped_vm_nat_forward(
     vm_name: str,
     ssh_port: int,
 ) -> None:
+    _remove_base_vm_nat_forward(vboxmanage_path, vm_name)
     _run_vboxmanage(
         vboxmanage_path,
         [
@@ -419,6 +457,7 @@ def _add_running_vm_nat_forward(
     vm_name: str,
     ssh_port: int,
 ) -> None:
+    _remove_base_vm_nat_forward(vboxmanage_path, vm_name)
     _run_vboxmanage(
         vboxmanage_path,
         [
@@ -439,7 +478,7 @@ def _remove_base_vm_nat_forward(vboxmanage_path: Path, vm_name: str) -> None:
     if state == VirtualMachineState.RUNNING:
         command = ["controlvm", vm_name, "natpf1delete", _BASE_SSH_FORWARD_NAME]
     else:
-        command = ["modifyvm", vm_name, f"--nat-pf1=delete={_BASE_SSH_FORWARD_NAME}"]
+        command = ["modifyvm", vm_name, "--nat-pf1", "delete", _BASE_SSH_FORWARD_NAME]
 
     try:
         _run_vboxmanage(vboxmanage_path, command)
@@ -484,9 +523,11 @@ def _wait_for_ssh(
 
     while time.monotonic() < deadline:
         try:
+            _wait_for_ssh_banner(ssh_port)
             return _connect_ssh(configuration, ssh_port)
         except (
             OSError,
+            _SshNotReadyError,
             paramiko.AuthenticationException,
             paramiko.SSHException,
         ) as error:
@@ -496,6 +537,30 @@ def _wait_for_ssh(
     raise RuntimeError(
         f"Timed out waiting for SSH on base VM '{configuration.vm_name}': {last_error}"
     )
+
+
+def _wait_for_ssh_banner(ssh_port: int) -> None:
+    with socket.create_connection((_SSH_FORWARD_HOST, ssh_port), timeout=5) as client:
+        client.settimeout(5)
+        banner = _read_ssh_banner(client)
+
+    if not banner.startswith("SSH-"):
+        raise _SshNotReadyError(f"Port was reachable but did not speak SSH: {banner}")
+
+
+def _read_ssh_banner(client: socket.socket) -> str:
+    chunks: list[bytes] = []
+
+    while sum(len(chunk) for chunk in chunks) < 255:
+        chunk = client.recv(1)
+        if not chunk:
+            break
+
+        chunks.append(chunk)
+        if chunk == b"\n":
+            break
+
+    return b"".join(chunks).decode("utf-8", errors="replace").strip()
 
 
 def _connect_ssh(

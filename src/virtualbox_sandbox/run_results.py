@@ -57,9 +57,13 @@ def _write_text(path: Path, text: str) -> None:
     path.write_text(f"{text}\n", encoding="utf-8")
 
 
-def _write_artifacts(run_directory: Path, artifacts: dict[str, str]) -> None:
+def _write_artifacts(run_directory: Path, artifacts: dict[str, str | bytes]) -> None:
     for file_name, content in artifacts.items():
-        _write_text(run_directory / file_name, content)
+        path = run_directory / file_name
+        if isinstance(content, bytes):
+            path.write_bytes(content)
+        else:
+            _write_text(path, content)
 
 
 def _write_json(path: Path, data: dict[str, object]) -> None:

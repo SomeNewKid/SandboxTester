@@ -64,6 +64,7 @@ class CapabilityContext:
     allowed_git_repository: Path | None = None
     denied_git_repository: Path | None = None
     git_remote_url: str | None = None
+    output_directory: Path | None = None
     allow_camera_capture: bool = False
     allow_microphone_capture: bool = False
 
@@ -100,6 +101,7 @@ class CapabilityContext:
         allowed_git_repository: Path | None = None,
         denied_git_repository: Path | None = None,
         git_remote_url: str | None = None,
+        output_directory: Path | None = None,
         allow_camera_capture: bool = False,
         allow_microphone_capture: bool = False,
     ) -> "CapabilityContext":
@@ -158,6 +160,9 @@ class CapabilityContext:
                 else None
             ),
             git_remote_url=git_remote_url,
+            output_directory=(
+                output_directory.resolve() if output_directory is not None else None
+            ),
             allow_camera_capture=allow_camera_capture,
             allow_microphone_capture=allow_microphone_capture,
         )
@@ -204,6 +209,7 @@ class CapabilityContext:
             ),
             "denied_git_repository": _optional_path_to_json(self.denied_git_repository),
             "git_remote_url": self.git_remote_url,
+            "output_directory": _optional_path_to_json(self.output_directory),
             "allow_camera_capture": self.allow_camera_capture,
             "allow_microphone_capture": self.allow_microphone_capture,
         }
@@ -253,6 +259,7 @@ class CapabilityContext:
                 data.get("denied_git_repository")
             ),
             git_remote_url=data.get("git_remote_url"),
+            output_directory=_optional_path_from_json(data.get("output_directory")),
             allow_camera_capture=bool(data.get("allow_camera_capture")),
             allow_microphone_capture=bool(data.get("allow_microphone_capture")),
         )

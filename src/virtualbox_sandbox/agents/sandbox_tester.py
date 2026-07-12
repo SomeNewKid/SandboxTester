@@ -31,12 +31,16 @@ def get_profile() -> PythonAgentProfile:
             "openai",
             "paramiko",
             "pillow",
+            "playwright",
             "pymysql",
         ],
         entry_script=_ENTRY_SCRIPT,
         exclude_patterns=[
             "__pycache__",
             "*.pyc",
+        ],
+        post_install_commands=[
+            "{python} -m playwright install chromium",
         ],
         environment_variables={
             "OPENAI_API_KEY": "[local]",

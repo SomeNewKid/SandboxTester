@@ -125,6 +125,7 @@ def _run_local_sandbox(
         allowed_git_repository=ALLOWED_GIT_REPOSITORY,
         denied_git_repository=DENIED_GIT_REPOSITORY,
         git_remote_url=GIT_REMOTE_URL,
+        output_directory=run_directory,
         allow_camera_capture=ALLOW_CAMERA_CAPTURE,
         allow_microphone_capture=ALLOW_MICROPHONE_CAPTURE,
     )
