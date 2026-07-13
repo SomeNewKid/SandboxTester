@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from qemu_sandbox.credentials import load_or_create_guest_credentials
@@ -44,6 +45,40 @@ def test_qemu_command_uses_requested_ssh_forward(tmp_path: Path) -> None:
     assert f"file={run_disk_path},format=qcow2,if=virtio" in command
     assert "user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22" in command
     assert "virtio-net-pci,netdev=net0" in command
+
+
+def test_microvm_qemu_command_uses_direct_boot_and_mmio_devices(
+    tmp_path: Path,
+) -> None:
+    """Verify microvm mode uses direct boot and non-PCI virtio devices."""
+    configuration = _create_test_configuration(tmp_path)
+    configuration = replace(
+        configuration,
+        machine="microvm",
+        kernel_path=tmp_path / "vmlinuz",
+        initrd_path=tmp_path / "initrd.img",
+        kernel_append="console=ttyS0 root=UUID=test rw",
+    )
+    run_disk_path = tmp_path / "run.qcow2"
+    command = _build_qemu_command(
+        configuration,
+        Path("qemu-system-x86_64"),
+        run_disk_path,
+        2222,
+    )
+
+    assert "-M" in command
+    assert "microvm,accel=whpx" in command
+    assert "-kernel" in command
+    assert str(tmp_path / "vmlinuz") in command
+    assert "-initrd" in command
+    assert str(tmp_path / "initrd.img") in command
+    assert "-append" in command
+    assert "console=ttyS0 root=UUID=test rw" in command
+    assert "id=root,file=" + str(run_disk_path) + ",format=qcow2,if=none" in command
+    assert "virtio-blk-device,drive=root" in command
+    assert "virtio-net-device,netdev=net0" in command
+    assert "virtio-net-pci,netdev=net0" not in command
 
 
 def test_qemu_run_results_do_not_write_result_json(tmp_path: Path) -> None:
@@ -102,6 +137,9 @@ def _create_test_configuration(tmp_path: Path) -> QemuConfiguration:
     return QemuConfiguration(
         base_directory=tmp_path,
         base_image_path=tmp_path / "base.qcow2",
+        kernel_path=None,
+        initrd_path=None,
+        kernel_append=None,
         qemu_path=Path("qemu-system-x86_64"),
         guest_credentials=GuestCredentials(
             user="sandbox",

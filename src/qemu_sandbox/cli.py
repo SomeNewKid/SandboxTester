@@ -14,7 +14,14 @@ from .run_results import save_run_results
 from .virtual_machine_setup import QemuVirtualMachineSetup
 
 _DEFAULT_BASE_DIRECTORY = Path(".qemu_sandbox")
-_DEFAULT_BASE_IMAGE_NAME = "ubuntu-24.04-sandbox-base.clean.qcow2"
+_DEFAULT_BASE_IMAGE_NAME = "ubuntu-24.04-sandbox-base-16g.compact.qcow2"
+_DEFAULT_KERNEL_PATH = Path("kernel") / "vmlinuz"
+_DEFAULT_INITRD_PATH = Path("kernel") / "initrd.img"
+_DEFAULT_MICROVM_KERNEL_APPEND = (
+    "earlyprintk=ttyS0 console=ttyS0 "
+    "root=UUID=37d79bb1-1898-41f4-8dd5-8d76bd6102b7 "
+    "rw rootwait reboot=t"
+)
 _DEFAULT_GUEST_USER = "sandbox"
 _DEFAULT_MACHINE = "q35"
 _DEFAULT_ACCELERATOR = "auto"
@@ -63,6 +70,32 @@ def _parse_arguments() -> argparse.Namespace:
         help=(
             "Reusable base qcow2 image. Defaults to "
             f"{_DEFAULT_BASE_DIRECTORY / _DEFAULT_BASE_IMAGE_NAME}."
+        ),
+    )
+    parser.add_argument(
+        "--kernel",
+        type=Path,
+        default=None,
+        help=(
+            "Linux kernel image for QEMU microvm direct boot. Defaults to "
+            f"{_DEFAULT_BASE_DIRECTORY / _DEFAULT_KERNEL_PATH}."
+        ),
+    )
+    parser.add_argument(
+        "--initrd",
+        type=Path,
+        default=None,
+        help=(
+            "Linux initrd image for QEMU microvm direct boot. Defaults to "
+            f"{_DEFAULT_BASE_DIRECTORY / _DEFAULT_INITRD_PATH}."
+        ),
+    )
+    parser.add_argument(
+        "--kernel-append",
+        default=None,
+        help=(
+            "Kernel command line for QEMU microvm direct boot. Defaults to the "
+            "prepared Ubuntu base image root UUID."
         ),
     )
     parser.add_argument(
@@ -130,6 +163,17 @@ def _parse_arguments() -> argparse.Namespace:
 def _configuration_from_arguments(arguments: argparse.Namespace) -> QemuConfiguration:
     base_directory = arguments.base_directory.resolve()
     base_image_path = _resolve_base_image_path(base_directory, arguments.base_image)
+    kernel_path = _resolve_optional_asset_path(
+        base_directory,
+        arguments.kernel,
+        _DEFAULT_KERNEL_PATH,
+    )
+    initrd_path = _resolve_optional_asset_path(
+        base_directory,
+        arguments.initrd,
+        _DEFAULT_INITRD_PATH,
+    )
+    kernel_append = _resolve_kernel_append(arguments.kernel_append)
     credentials = load_or_create_guest_credentials(
         base_directory,
         arguments.guest_user,
@@ -138,6 +182,9 @@ def _configuration_from_arguments(arguments: argparse.Namespace) -> QemuConfigur
     return QemuConfiguration(
         base_directory=base_directory,
         base_image_path=base_image_path,
+        kernel_path=kernel_path,
+        initrd_path=initrd_path,
+        kernel_append=kernel_append,
         qemu_path=arguments.qemu,
         guest_credentials=credentials,
         machine=arguments.machine,
@@ -156,6 +203,24 @@ def _resolve_base_image_path(
         return configured_base_image.expanduser().resolve()
 
     return (base_directory / _DEFAULT_BASE_IMAGE_NAME).resolve()
+
+
+def _resolve_optional_asset_path(
+    base_directory: Path,
+    configured_path: Path | None,
+    default_relative_path: Path,
+) -> Path | None:
+    if configured_path is not None:
+        return configured_path.expanduser().resolve()
+
+    return (base_directory / default_relative_path).resolve()
+
+
+def _resolve_kernel_append(configured_kernel_append: str | None) -> str:
+    if configured_kernel_append is not None:
+        return configured_kernel_append
+
+    return _DEFAULT_MICROVM_KERNEL_APPEND
 
 
 def _print_result(result: QemuRunResult) -> None:

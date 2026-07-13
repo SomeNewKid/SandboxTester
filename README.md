@@ -77,7 +77,7 @@ captured inside result objects while tests run, but serialized reports replace
   `virtualbox_sandbox` CLI accepts `--iso`, checks `SANDBOX_TESTER_ISO`, and
   then checks the Downloads directory.
 - A prepared Ubuntu qcow2 base image at
-  `.qemu_sandbox/ubuntu-24.04-sandbox-base.clean.qcow2`, when using
+  `.qemu_sandbox/ubuntu-24.04-sandbox-base-16g.compact.qcow2`, when using
   `qemu_sandbox`.
 - Any deployment-specific test resources configured in `src/local_sandbox/cli.py`,
   such as a mounted/shared directory.
@@ -195,13 +195,19 @@ with OpenSSH, Python, Playwright dependencies, and Chromium already installed.
 The default base image path is:
 
 ```text
-.qemu_sandbox/ubuntu-24.04-sandbox-base.clean.qcow2
+.qemu_sandbox/ubuntu-24.04-sandbox-base-16g.compact.qcow2
 ```
 
 Run the `sandbox_tester` agent in a disposable QEMU VM:
 
 ```powershell
 .\.venv\Scripts\python.exe -m qemu_sandbox --agent sandbox_tester
+```
+
+Run the same agent with QEMU's `microvm` machine type:
+
+```powershell
+.\.venv\Scripts\python.exe -m qemu_sandbox --machine microvm --agent sandbox_tester
 ```
 
 To serialize captured evidence from the guest report:
@@ -211,12 +217,16 @@ To serialize captured evidence from the guest report:
 ```
 
 For each disposable run, `qemu_sandbox` copies the base qcow2 image into
-`.qemu_sandbox/runs/run-...`, starts QEMU using the `q35` machine type and
-automatic accelerator selection, waits for SSH, prepares a guest run directory
-under `/tmp/sandbox-tester`, uploads the Python agent source, runs it, downloads
-artifacts, then shuts down the VM and removes the copied run disk. Use
-`--keep-vm` to leave the VM running and retain its copied disk for inspection
-after setup or execution.
+`.qemu_sandbox/runs/run-...`, starts QEMU using automatic accelerator selection,
+waits for SSH, prepares a guest run directory under `/tmp/sandbox-tester`,
+uploads the Python agent source, runs it, downloads artifacts, then shuts down
+the VM and removes the copied run disk. Use `--keep-vm` to leave the VM running
+and retain its copied disk for inspection after setup or execution.
+
+The default `q35` mode uses normal PC-style QEMU devices. The `microvm` mode
+uses direct Linux boot with `.qemu_sandbox/kernel/vmlinuz`,
+`.qemu_sandbox/kernel/initrd.img`, the prepared base image root UUID, and
+virtio-mmio block/network devices.
 
 The file protocol for each QEMU run is:
 
@@ -227,6 +237,7 @@ The file protocol for each QEMU run is:
   stderr.txt
   stdout.txt
   run-metadata.json
+  serial.log                    # when run with --machine microvm
   playwright_shell_screenshot.png
   playwright_tool_screenshot.png
   ubuntu-24.04-sandbox-run.qcow2  # only retained with --keep-vm
@@ -285,11 +296,11 @@ The `sandbox_tester` VirtualBox agent profile lives in
 `src/virtualbox_sandbox/guest_run_layout.py`.
 
 For QEMU runs, VM configuration is exposed through `src/qemu_sandbox/cli.py`
-flags such as `--base-directory`, `--base-image`, `--qemu`, `--machine`,
-`--accelerator`, `--cpu`, `--memory-mb`, `--cpus`, `--guest-user`,
-`--keep-vm`, `--agent`, `--verbose`, and `--serialize-evidence`. The initial
-implementation uses the existing Python agent profile and guest runner shared
-with `virtualbox_sandbox`.
+flags such as `--base-directory`, `--base-image`, `--kernel`, `--initrd`,
+`--kernel-append`, `--qemu`, `--machine`, `--accelerator`, `--cpu`,
+`--memory-mb`, `--cpus`, `--guest-user`, `--keep-vm`, `--agent`, `--verbose`,
+and `--serialize-evidence`. The implementation uses the existing Python agent
+profile and guest runner shared with `virtualbox_sandbox`.
 
 ## Development Checks
 

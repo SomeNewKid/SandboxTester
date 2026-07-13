@@ -28,6 +28,9 @@ class QemuConfiguration:
 
     base_directory: Path
     base_image_path: Path
+    kernel_path: Path | None
+    initrd_path: Path | None
+    kernel_append: str | None
     qemu_path: Path
     guest_credentials: GuestCredentials
     machine: str

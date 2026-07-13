@@ -182,6 +182,28 @@ def _build_qemu_command(
     run_disk_path: Path,
     ssh_port: int,
 ) -> list[str]:
+    if configuration.machine == "microvm":
+        return _build_microvm_qemu_command(
+            configuration,
+            qemu_path,
+            run_disk_path,
+            ssh_port,
+        )
+
+    return _build_pc_qemu_command(
+        configuration,
+        qemu_path,
+        run_disk_path,
+        ssh_port,
+    )
+
+
+def _build_pc_qemu_command(
+    configuration: QemuConfiguration,
+    qemu_path: Path,
+    run_disk_path: Path,
+    ssh_port: int,
+) -> list[str]:
     host_forward = f"tcp:{_SSH_FORWARD_HOST}:{ssh_port}-:22"
     return [
         str(qemu_path),
@@ -201,6 +223,57 @@ def _build_qemu_command(
         "virtio-net-pci,netdev=net0",
         "-display",
         "none",
+    ]
+
+
+def _build_microvm_qemu_command(
+    configuration: QemuConfiguration,
+    qemu_path: Path,
+    run_disk_path: Path,
+    ssh_port: int,
+) -> list[str]:
+    if configuration.kernel_path is None:
+        raise ValueError("--kernel is required for QEMU microvm mode.")
+
+    if configuration.initrd_path is None:
+        raise ValueError("--initrd is required for QEMU microvm mode.")
+
+    if configuration.kernel_append is None:
+        raise ValueError("--kernel-append is required for QEMU microvm mode.")
+
+    host_forward = f"tcp:{_SSH_FORWARD_HOST}:{ssh_port}-:22"
+    serial_log_path = run_disk_path.parent / "serial.log"
+    return [
+        str(qemu_path),
+        "-M",
+        f"microvm,accel={configuration.accelerator}",
+        "-cpu",
+        configuration.cpu,
+        "-m",
+        str(configuration.memory_megabytes),
+        "-smp",
+        str(configuration.cpu_count),
+        "-kernel",
+        str(configuration.kernel_path),
+        "-initrd",
+        str(configuration.initrd_path),
+        "-append",
+        configuration.kernel_append,
+        "-nodefaults",
+        "-no-user-config",
+        "-display",
+        "none",
+        "-serial",
+        f"file:{serial_log_path}",
+        "-no-reboot",
+        "-drive",
+        f"id=root,file={run_disk_path},format=qcow2,if=none",
+        "-device",
+        "virtio-blk-device,drive=root",
+        "-netdev",
+        f"user,id=net0,hostfwd={host_forward}",
+        "-device",
+        "virtio-net-device,netdev=net0",
     ]
 
 
