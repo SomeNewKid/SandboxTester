@@ -1,0 +1,10 @@
+.git
+.venv
+.local_sandbox
+.virtualbox_sandbox
+.qemu_sandbox
+.docker_sandbox
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache

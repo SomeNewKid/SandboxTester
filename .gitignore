@@ -218,6 +218,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # SandboxTester
+.docker_sandbox/
 .local_sandbox/
 .qemu_sandbox/
 .virtualbox_sandbox/

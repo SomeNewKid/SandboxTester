@@ -1,0 +1,140 @@
+"""Command-line interface for Docker sandbox experiments."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from .container_factory import ensure_base_image
+from .models import (
+    DockerConfiguration,
+    DockerImageResult,
+    DockerImageStatus,
+    DockerRunResult,
+)
+from .run_results import save_run_results
+from .sandbox_container import run_sandbox_container
+
+_DEFAULT_BASE_DIRECTORY = Path(".docker_sandbox")
+_DEFAULT_IMAGE_NAME = "sandbox-tester/docker-sandbox:dev"
+_DEFAULT_DOCKERFILE = Path("src") / "docker_sandbox" / "dockerfile" / "Dockerfile"
+
+
+def main(arguments: list[str] | None = None) -> int:
+    """Run the Docker sandbox command-line interface."""
+    parsed_arguments = _parse_arguments(arguments)
+    configuration = _configuration_from_arguments(parsed_arguments)
+    image_result = ensure_base_image(configuration)
+    _print_image_result(image_result)
+
+    if image_result.status not in {DockerImageStatus.EXISTS, DockerImageStatus.CREATED}:
+        return 1
+
+    run_result = run_sandbox_container(
+        configuration,
+        verbose=parsed_arguments.verbose,
+        serialize_evidence=parsed_arguments.serialize_evidence,
+    )
+    save_run_results(run_result)
+    print(f"Run results saved to: {run_result.run_directory}")
+
+    if parsed_arguments.keep_container:
+        print(f"Kept disposable Docker container '{run_result.container_name}'.")
+    else:
+        run_result.remove_container()
+        print(f"Removed disposable Docker container '{run_result.container_name}'.")
+
+    return _exit_code_from_run_result(run_result)
+
+
+def _parse_arguments(arguments: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Create or reuse a Docker image for sandbox experiments."
+    )
+    parser.add_argument(
+        "--base-directory",
+        type=Path,
+        default=_DEFAULT_BASE_DIRECTORY,
+        help=(
+            f"Host directory for Docker sandbox files. Default: "
+            f"{_DEFAULT_BASE_DIRECTORY}"
+        ),
+    )
+    parser.add_argument(
+        "--image",
+        default=_DEFAULT_IMAGE_NAME,
+        help=(
+            "Docker image tag for the sandbox base image. "
+            f"Default: {_DEFAULT_IMAGE_NAME}"
+        ),
+    )
+    parser.add_argument(
+        "--dockerfile",
+        type=Path,
+        default=_DEFAULT_DOCKERFILE,
+        help=f"Dockerfile used to build the image. Default: {_DEFAULT_DOCKERFILE}",
+    )
+    parser.add_argument(
+        "--keep-container",
+        action="store_true",
+        help="Keep the disposable container after execution instead of removing it.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Pass verbose progress output through to Sandbox Tester.",
+    )
+    parser.add_argument(
+        "--serialize-evidence",
+        action="store_true",
+        help="Include captured evidence in serialized Sandbox Tester reports.",
+    )
+    return parser.parse_args(arguments)
+
+
+def _configuration_from_arguments(
+    arguments: argparse.Namespace,
+) -> DockerConfiguration:
+    repository_root = Path.cwd().resolve()
+    base_directory = arguments.base_directory.expanduser().resolve()
+    dockerfile_path = arguments.dockerfile.expanduser()
+    if not dockerfile_path.is_absolute():
+        dockerfile_path = repository_root / dockerfile_path
+
+    return DockerConfiguration(
+        base_directory=base_directory,
+        image_name=arguments.image,
+        dockerfile_path=dockerfile_path.resolve(),
+        build_context=repository_root,
+    )
+
+
+def _print_image_result(result: DockerImageResult) -> None:
+    if result.status == DockerImageStatus.DOCKER_MISSING:
+        print("Docker CLI was not found on PATH.")
+        return
+
+    if result.status == DockerImageStatus.DOCKERFILE_MISSING:
+        print(f"Dockerfile was not found: {result.dockerfile_path}")
+        return
+
+    if result.status == DockerImageStatus.EXISTS:
+        print(f"Docker sandbox base image already exists: {result.image_name}")
+        return
+
+    if result.status == DockerImageStatus.CREATED:
+        print(f"Docker sandbox base image created: {result.image_name}")
+        return
+
+    print(f"Docker sandbox base image build failed: {result.image_name}")
+
+
+def _exit_code_from_image_result(result: DockerImageResult) -> int:
+    if result.status in {DockerImageStatus.EXISTS, DockerImageStatus.CREATED}:
+        return 0
+
+    return 1
+
+
+def _exit_code_from_run_result(result: DockerRunResult) -> int:
+    return result.exit_code
