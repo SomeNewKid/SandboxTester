@@ -219,4 +219,5 @@ __marimo__/
 
 # SandboxTester
 .local_sandbox/
+.qemu_sandbox/
 .virtualbox_sandbox/

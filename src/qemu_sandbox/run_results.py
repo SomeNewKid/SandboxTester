@@ -1,4 +1,4 @@
-"""Persist VirtualBox sandbox run results."""
+"""Persist QEMU sandbox run results."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .models import GuestScriptResult, VmCloneResult
+from virtualbox_sandbox.models import GuestScriptResult
+
+from .models import QemuRunResult
 
 _STDOUT_FILE_NAME = "stdout.txt"
 _STDERR_FILE_NAME = "stderr.txt"
@@ -15,7 +17,7 @@ _METADATA_FILE_NAME = "run-metadata.json"
 
 def save_run_results(
     run_directory: Path,
-    clone_result: VmCloneResult,
+    run_result: QemuRunResult,
     script_result: GuestScriptResult,
 ) -> None:
     """Save guest script output and metadata to the local run directory."""
@@ -25,17 +27,19 @@ def save_run_results(
     _write_artifacts(run_directory, script_result.artifacts)
     _write_json(
         run_directory / _METADATA_FILE_NAME,
-        _create_metadata_data(clone_result),
+        _create_metadata_data(run_result),
     )
 
 
-def _create_metadata_data(clone_result: VmCloneResult) -> dict[str, object]:
+def _create_metadata_data(run_result: QemuRunResult) -> dict[str, object]:
     return {
         "timestamp_utc": datetime.now(UTC).isoformat(),
-        "base_vm_name": clone_result.base_vm_name,
-        "run_vm_name": clone_result.run_vm_name,
-        "ssh_host": clone_result.ssh_host,
-        "ssh_port": clone_result.ssh_port,
+        "base_image_path": str(run_result.base_image_path),
+        "qemu_path": str(run_result.qemu_path),
+        "run_disk_path": str(run_result.run_disk_path),
+        "ssh_host": run_result.ssh_host,
+        "ssh_port": run_result.ssh_port,
+        "command": run_result.command,
     }
 
 

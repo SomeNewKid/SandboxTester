@@ -361,7 +361,12 @@ def _run_remote_command_and_stream(
 
 def _write_stream_chunk(stream: object, chunk: bytes) -> None:
     text = chunk.decode("utf-8", errors="replace")
-    stream.write(text)  # type: ignore[attr-defined]
+    try:
+        stream.write(text)  # type: ignore[attr-defined]
+    except UnicodeEncodeError:
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        safe_text = text.encode(encoding, errors="replace").decode(encoding)
+        stream.write(safe_text)  # type: ignore[attr-defined]
     stream.flush()  # type: ignore[attr-defined]
 
 

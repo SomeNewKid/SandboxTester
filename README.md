@@ -30,6 +30,10 @@ The project now has three related command-line paths:
   port forwarding, uploads scripts or Python agent source, prepares guest
   fixtures, runs the selected guest code, downloads run artifacts, and destroys
   the clone by default.
+- `qemu_sandbox` is the QEMU harness. It copies a prepared Ubuntu qcow2 base
+  image to a disposable run disk, starts QEMU with user-mode SSH port
+  forwarding, uploads and runs the selected Python agent, downloads Sandbox
+  Tester artifacts, and stops the VM by default.
 
 Each capability is tested through three invocation paths:
 
@@ -68,9 +72,13 @@ captured inside result objects while tests run, but serialized reports replace
 - Python 3.11.
 - PowerShell on Windows.
 - Oracle VirtualBox, when using `virtualbox_sandbox`.
+- QEMU for Windows, when using `qemu_sandbox`.
 - An Ubuntu Server ISO, when creating a new VirtualBox base VM. The
   `virtualbox_sandbox` CLI accepts `--iso`, checks `SANDBOX_TESTER_ISO`, and
   then checks the Downloads directory.
+- A prepared Ubuntu qcow2 base image at
+  `.qemu_sandbox/ubuntu-24.04-sandbox-base.clean.qcow2`, when using
+  `qemu_sandbox`.
 - Any deployment-specific test resources configured in `src/local_sandbox/cli.py`,
   such as a mounted/shared directory.
 
@@ -180,6 +188,50 @@ uploads the script or agent, runs it, saves local artifacts under
 `.virtualbox_sandbox/runs/run-...`, then stops and removes the clone. Use
 `--keep-vm` to leave the clone running for inspection after setup or execution.
 
+## Running In QEMU
+
+The QEMU workflow currently assumes a manually prepared Ubuntu qcow2 base image
+with OpenSSH, Python, Playwright dependencies, and Chromium already installed.
+The default base image path is:
+
+```text
+.qemu_sandbox/ubuntu-24.04-sandbox-base.clean.qcow2
+```
+
+Run the `sandbox_tester` agent in a disposable QEMU VM:
+
+```powershell
+.\.venv\Scripts\python.exe -m qemu_sandbox --agent sandbox_tester
+```
+
+To serialize captured evidence from the guest report:
+
+```powershell
+.\.venv\Scripts\python.exe -m qemu_sandbox --agent sandbox_tester --serialize-evidence
+```
+
+For each disposable run, `qemu_sandbox` copies the base qcow2 image into
+`.qemu_sandbox/runs/run-...`, starts QEMU using the `q35` machine type and
+automatic accelerator selection, waits for SSH, prepares a guest run directory
+under `/tmp/sandbox-tester`, uploads the Python agent source, runs it, downloads
+artifacts, then shuts down the VM and removes the copied run disk. Use
+`--keep-vm` to leave the VM running and retain its copied disk for inspection
+after setup or execution.
+
+The file protocol for each QEMU run is:
+
+```text
+.qemu_sandbox/runs/run-YYYY-mm-dd-HH-MM-SS/
+  config.json
+  report.json
+  stderr.txt
+  stdout.txt
+  run-metadata.json
+  playwright_shell_screenshot.png
+  playwright_tool_screenshot.png
+  ubuntu-24.04-sandbox-run.qcow2  # only retained with --keep-vm
+```
+
 ## Architecture
 
 The project is split into three packages:
@@ -195,11 +247,16 @@ The project is split into three packages:
   base VM lifecycle, disposable clone lifecycle, guest credentials, NAT SSH port
   forwarding, guest run layout creation, script and source upload, Python
   dependency installation, remote execution, artifact download, and VM teardown.
+- `qemu_sandbox`: the QEMU orchestration harness. It manages disposable run disk
+  creation from a prepared qcow2 base image, QEMU process lifecycle, guest
+  credentials, user-mode SSH port forwarding, agent execution, artifact
+  download, and VM teardown.
 
 `local_sandbox` still invokes `sandbox_tester` locally as the current user.
-`virtualbox_sandbox` exercises the same file-based boundary across an SSH
-connection into a disposable Ubuntu VM clone, so the host prepares the guest
-environment and the guest agent tests the capabilities available inside that VM.
+`virtualbox_sandbox` and `qemu_sandbox` exercise the same file-based boundary
+across an SSH connection into a disposable Ubuntu guest, so the host prepares
+the guest environment and the guest agent tests the capabilities available
+inside that VM.
 
 ## Configuration
 
@@ -226,6 +283,13 @@ The `sandbox_tester` VirtualBox agent profile lives in
 `src/virtualbox_sandbox/agents/sandbox_tester.py`. The guest fixture and
 `CapabilityContext` JSON layout are created by
 `src/virtualbox_sandbox/guest_run_layout.py`.
+
+For QEMU runs, VM configuration is exposed through `src/qemu_sandbox/cli.py`
+flags such as `--base-directory`, `--base-image`, `--qemu`, `--machine`,
+`--accelerator`, `--cpu`, `--memory-mb`, `--cpus`, `--guest-user`,
+`--keep-vm`, `--agent`, `--verbose`, and `--serialize-evidence`. The initial
+implementation uses the existing Python agent profile and guest runner shared
+with `virtualbox_sandbox`.
 
 ## Development Checks
 
@@ -272,6 +336,15 @@ src/virtualbox_sandbox/
   credentials.py              Local guest credential creation/loading
   run_results.py              Local run artifact persistence
   diagnostic.py               Diagnostic guest Python script
+
+src/qemu_sandbox/
+  __main__.py                 Package entry point for python -m qemu_sandbox
+  cli.py                      QEMU command-line orchestration
+  qemu_machine_factory.py     Run disk, SSH port, QEMU command, and teardown
+  virtual_machine_setup.py    SSH setup, guest preparation, execution, artifacts
+  credentials.py              Local guest credential creation/loading
+  run_results.py              Local run artifact persistence
+  models.py                   QEMU orchestration dataclasses
 
 tests/
   test_smoke.py
