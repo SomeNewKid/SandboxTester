@@ -10,6 +10,7 @@ import shutil
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .models import DockerConfiguration, DockerRunResult
 
@@ -18,7 +19,12 @@ _REMOTE_OUTPUT_DIRECTORY = "/sandbox-output"
 _REMOTE_LANDLOCK_POLICY_PATH = f"{_REMOTE_OUTPUT_DIRECTORY}/landlock-policy.json"
 _REMOTE_SOURCE_DIRECTORY = "/sandbox-source/src"
 _CONTAINER_NAME_PREFIX = "sandbox-tester-run"
+_GATEWAY_CONTAINER_NAME_PREFIX = "sandbox-tester-gateway"
+_NETWORK_NAME_PREFIX = "sandbox-tester-net"
 _READONLY_DENIED_SOURCE_DIRECTORY = "readonly-denied"
+_SQUID_CONFIGURATION_FILE_NAME = "squid.conf"
+_GATEWAY_START_RESULTS_FILE_NAME = "gateway-start-results.json"
+_GATEWAY_LOG_FILE_NAME = "gateway-logs.json"
 _ALLOWED_FILE_CONTENT = "This is a test file for the allowed directory."
 _DENIED_FILE_CONTENT = "This is a test file for the denied directory."
 _HIDDEN_ALLOWED_FILE_CONTENT = "This is a hidden file."
@@ -41,30 +47,42 @@ def run_sandbox_container(
     run_directory = configuration.base_directory / "runs" / run_id
     run_directory.mkdir(parents=True, exist_ok=True)
     container_name = f"{_CONTAINER_NAME_PREFIX}-{timestamp}"
+    gateway_container_name = _build_gateway_container_name(configuration, timestamp)
+    network_name = _build_network_name(configuration, timestamp)
     remote_run_directory = _build_remote_run_directory(configuration, run_id)
     allowed_directory = _build_allowed_directory(configuration, remote_run_directory)
     denied_directory = _build_denied_directory(configuration, remote_run_directory)
     _prepare_readonly_denied_directory(configuration, run_directory)
     _write_landlock_policy(configuration, run_directory)
-    config_json = _build_config_json(
+    config_data = _build_config_data(
         remote_run_directory,
         allowed_directory,
         denied_directory,
         configuration.guest_user,
     )
+    _write_squid_configuration(configuration, run_directory, config_data)
     config_path = run_directory / "config.json"
-    config_path.write_text(config_json, encoding="utf-8")
+    config_json = json.dumps(config_data, indent=2)
+    config_path.write_text(f"{config_json}\n", encoding="utf-8")
     environment_variables = _resolve_environment_variables(
         _SANDBOX_TESTER_ENVIRONMENT_VARIABLES,
+    )
+    gateway_commands, gateway_ip_address = _start_network_gateway(
+        configuration,
+        run_directory,
+        network_name,
+        gateway_container_name,
     )
     command = _build_docker_run_command(
         configuration=configuration,
         run_directory=run_directory,
         container_name=container_name,
+        network_name=network_name,
         remote_run_directory=remote_run_directory,
         allowed_directory=allowed_directory,
         denied_directory=denied_directory,
         environment_variables=environment_variables,
+        gateway_ip_address=gateway_ip_address,
         local_environment_variable_names=_get_local_environment_variable_names(
             _SANDBOX_TESTER_ENVIRONMENT_VARIABLES,
         ),
@@ -77,8 +95,14 @@ def run_sandbox_container(
         capture_output=True,
         text=True,
     )
+    _write_gateway_logs(configuration, run_directory, gateway_container_name)
     _delete_readonly_denied_directory(configuration, run_directory)
     remove_command = _build_docker_remove_command(container_name)
+    gateway_cleanup_commands = _build_gateway_cleanup_commands(
+        configuration,
+        network_name,
+        gateway_container_name,
+    )
 
     return DockerRunResult(
         image_name=configuration.profile.image_name,
@@ -90,6 +114,11 @@ def run_sandbox_container(
         exit_code=completed.returncode,
         stdout=completed.stdout,
         stderr=completed.stderr,
+        network_name=network_name,
+        gateway_container_name=gateway_container_name,
+        gateway_ip_address=gateway_ip_address,
+        gateway_commands=gateway_commands,
+        gateway_cleanup_commands=gateway_cleanup_commands,
     )
 
 
@@ -99,6 +128,26 @@ def _build_remote_run_directory(
 ) -> str:
     remote_root = configuration.profile.remote_run_root.rstrip("/")
     return f"{remote_root}/{run_id}"
+
+
+def _build_gateway_container_name(
+    configuration: DockerConfiguration,
+    timestamp: str,
+) -> str | None:
+    if configuration.profile.network_gateway is None:
+        return None
+
+    return f"{_GATEWAY_CONTAINER_NAME_PREFIX}-{timestamp}"
+
+
+def _build_network_name(
+    configuration: DockerConfiguration,
+    timestamp: str,
+) -> str | None:
+    if configuration.profile.network_gateway is None:
+        return None
+
+    return f"{_NETWORK_NAME_PREFIX}-{timestamp}"
 
 
 def _build_allowed_directory(
@@ -163,6 +212,302 @@ def _write_landlock_policy(
     policy_path.write_text(f"{policy_text}\n", encoding="utf-8")
 
 
+def _write_squid_configuration(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+    config_data: Mapping[str, object],
+) -> None:
+    gateway = configuration.profile.network_gateway
+    if gateway is None:
+        return
+
+    allowed_domains = _build_allowed_gateway_domains(
+        gateway.allowed_domains, config_data
+    )
+    squid_config = _build_squid_configuration_text(allowed_domains, gateway.proxy_port)
+    squid_config_path = run_directory / _SQUID_CONFIGURATION_FILE_NAME
+    squid_config_path.write_text(squid_config, encoding="utf-8")
+
+
+def _build_allowed_gateway_domains(
+    configured_domains: tuple[str, ...],
+    config_data: Mapping[str, object],
+) -> tuple[str, ...]:
+    domains = list(configured_domains)
+    _append_optional_domain(domains, config_data.get("allowed_domain"))
+    _append_git_remote_domain(domains, config_data.get("git_remote_url"))
+    normalized_domains = tuple(
+        dict.fromkeys(_normalize_gateway_domain(domain) for domain in domains)
+    )
+    return _remove_redundant_gateway_domain_suffixes(normalized_domains)
+
+
+def _append_optional_domain(domains: list[str], value: object) -> None:
+    if isinstance(value, str) and value:
+        domains.append(value)
+
+
+def _append_git_remote_domain(domains: list[str], value: object) -> None:
+    if not isinstance(value, str) or not value:
+        return
+
+    parsed_url = urlparse(value)
+    if parsed_url.hostname:
+        domains.append(parsed_url.hostname)
+
+
+def _normalize_gateway_domain(domain: str) -> str:
+    stripped_domain = domain.strip().lower()
+    if stripped_domain.startswith("*."):
+        return f".{stripped_domain[2:]}"
+
+    return stripped_domain
+
+
+def _remove_redundant_gateway_domain_suffixes(
+    domains: tuple[str, ...],
+) -> tuple[str, ...]:
+    exact_domains = {domain for domain in domains if not domain.startswith(".")}
+    filtered_domains = []
+    for domain in domains:
+        if domain.startswith(".") and domain[1:] in exact_domains:
+            continue
+
+        filtered_domains.append(domain)
+
+    return tuple(filtered_domains)
+
+
+def _build_squid_configuration_text(
+    allowed_domains: tuple[str, ...],
+    proxy_port: int,
+) -> str:
+    domains = " ".join(allowed_domains)
+    return "\n".join(
+        [
+            f"http_port {proxy_port}",
+            "acl SSL_ports port 443",
+            "acl Safe_ports port 80",
+            "acl Safe_ports port 443",
+            "acl CONNECT method CONNECT",
+            f"acl allowed_sites dstdomain {domains}",
+            "http_access deny !Safe_ports",
+            "http_access deny CONNECT !SSL_ports",
+            "http_access allow allowed_sites",
+            "http_access deny all",
+            "access_log none",
+            "cache_log /tmp/squid-cache.log",
+            "",
+        ]
+    )
+
+
+def _start_network_gateway(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+    network_name: str | None,
+    gateway_container_name: str | None,
+) -> tuple[list[list[str]] | None, str | None]:
+    gateway = configuration.profile.network_gateway
+    if gateway is None:
+        return None, None
+
+    if network_name is None or gateway_container_name is None:
+        raise RuntimeError(
+            "Network gateway profile requires network and container names."
+        )
+
+    commands = _build_gateway_start_commands(
+        gateway.image_name,
+        gateway_container_name,
+        network_name,
+        run_directory / _SQUID_CONFIGURATION_FILE_NAME,
+    )
+    results = []
+    for command in commands:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        results.append(_build_gateway_command_result(command, completed))
+
+    gateway_ip_address = _inspect_gateway_ip_address(
+        gateway_container_name, network_name
+    )
+    results.append(
+        {
+            "command": _build_gateway_inspect_command(
+                gateway_container_name,
+                network_name,
+            ),
+            "gateway_ip_address": gateway_ip_address,
+        }
+    )
+    _write_gateway_start_results(run_directory, results)
+
+    return commands, gateway_ip_address
+
+
+def _build_gateway_command_result(
+    command: list[str],
+    completed: subprocess.CompletedProcess[str],
+) -> dict[str, object]:
+    return {
+        "command": command,
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+
+
+def _inspect_gateway_ip_address(
+    gateway_container_name: str,
+    network_name: str,
+) -> str | None:
+    command = _build_gateway_inspect_command(gateway_container_name, network_name)
+    completed = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        return None
+
+    ip_address = completed.stdout.strip()
+    if not ip_address or ip_address == "<no value>":
+        return None
+
+    return ip_address
+
+
+def _build_gateway_inspect_command(
+    gateway_container_name: str,
+    network_name: str,
+) -> list[str]:
+    template = "{{(index (index .NetworkSettings.Networks "
+    template += f"{json.dumps(network_name)}"
+    template += ') "IPAddress")}}'
+    return [
+        _DOCKER_EXECUTABLE,
+        "inspect",
+        "--format",
+        template,
+        gateway_container_name,
+    ]
+
+
+def _write_gateway_start_results(
+    run_directory: Path,
+    results: list[dict[str, object]],
+) -> None:
+    results_path = run_directory / _GATEWAY_START_RESULTS_FILE_NAME
+    results_text = json.dumps(results, indent=2)
+    results_path.write_text(f"{results_text}\n", encoding="utf-8")
+
+
+def _write_gateway_logs(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+    gateway_container_name: str | None,
+) -> None:
+    if configuration.profile.network_gateway is None:
+        return
+
+    if gateway_container_name is None:
+        return
+
+    completed = subprocess.run(
+        [_DOCKER_EXECUTABLE, "logs", gateway_container_name],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    log_data = {
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+    log_text = json.dumps(log_data, indent=2)
+    log_path = run_directory / _GATEWAY_LOG_FILE_NAME
+    log_path.write_text(f"{log_text}\n", encoding="utf-8")
+
+
+def _build_gateway_start_commands(
+    gateway_image_name: str,
+    gateway_container_name: str,
+    network_name: str,
+    squid_config_path: Path,
+) -> list[list[str]]:
+    return [
+        [
+            _DOCKER_EXECUTABLE,
+            "network",
+            "create",
+            "--internal",
+            network_name,
+        ],
+        [
+            _DOCKER_EXECUTABLE,
+            "run",
+            "--detach",
+            "--name",
+            gateway_container_name,
+            "--network",
+            "bridge",
+            "--mount",
+            (
+                f"type=bind,source={squid_config_path},"
+                "target=/etc/squid/squid.conf,readonly"
+            ),
+            gateway_image_name,
+        ],
+        [
+            _DOCKER_EXECUTABLE,
+            "network",
+            "connect",
+            "--alias",
+            "egress-gateway",
+            network_name,
+            gateway_container_name,
+        ],
+        [
+            _DOCKER_EXECUTABLE,
+            "exec",
+            gateway_container_name,
+            "/bin/sh",
+            "-c",
+            (
+                "for attempt in 1 2 3 4 5; do "
+                "squid -k check -f /etc/squid/squid.conf >/dev/null 2>&1 "
+                "&& exit 0; "
+                "sleep 1; "
+                "done; "
+                "squid -k check -f /etc/squid/squid.conf"
+            ),
+        ],
+    ]
+
+
+def _build_gateway_cleanup_commands(
+    configuration: DockerConfiguration,
+    network_name: str | None,
+    gateway_container_name: str | None,
+) -> list[list[str]] | None:
+    if configuration.profile.network_gateway is None:
+        return None
+
+    if network_name is None or gateway_container_name is None:
+        return None
+
+    return [
+        [_DOCKER_EXECUTABLE, "rm", "--force", gateway_container_name],
+        [_DOCKER_EXECUTABLE, "network", "rm", network_name],
+    ]
+
+
 def _delete_readonly_denied_directory(
     configuration: DockerConfiguration,
     run_directory: Path,
@@ -183,13 +528,13 @@ def _delete_readonly_denied_directory(
     shutil.rmtree(denied_source_directory, ignore_errors=True)
 
 
-def _build_config_json(
+def _build_config_data(
     remote_run_directory: str,
     allowed_directory: str,
     denied_directory: str,
     guest_user: str,
-) -> str:
-    config = {
+) -> dict[str, object]:
+    return {
         "working_directory": remote_run_directory,
         "allowed_directory": allowed_directory,
         "denied_directory": denied_directory,
@@ -227,6 +572,20 @@ def _build_config_json(
         "allow_microphone_capture": True,
         "output_directory": _REMOTE_OUTPUT_DIRECTORY,
     }
+
+
+def _build_config_json(
+    remote_run_directory: str,
+    allowed_directory: str,
+    denied_directory: str,
+    guest_user: str,
+) -> str:
+    config = _build_config_data(
+        remote_run_directory,
+        allowed_directory,
+        denied_directory,
+        guest_user,
+    )
     return f"{json.dumps(config, indent=2)}\n"
 
 
@@ -235,9 +594,11 @@ def _build_docker_run_command(
     run_directory: Path,
     container_name: str,
     remote_run_directory: str,
+    network_name: str | None = None,
     allowed_directory: str | None = None,
     denied_directory: str | None = None,
     environment_variables: dict[str, str] | None = None,
+    gateway_ip_address: str | None = None,
     local_environment_variable_names: set[str] | None = None,
     verbose: bool = False,
     serialize_evidence: bool = False,
@@ -258,11 +619,17 @@ def _build_docker_run_command(
         "--user",
         configuration.guest_user,
     ]
+    if network_name is not None:
+        command.extend(["--network", network_name])
     command.extend(configuration.profile.container_run_options)
     command.extend(_build_readonly_denied_mount_options(configuration, run_directory))
     command.extend(
         _build_environment_options(
-            _build_container_environment(environment_variables or {}),
+            _build_container_environment(
+                configuration,
+                environment_variables or {},
+                gateway_ip_address,
+            ),
             local_environment_variable_names or set(),
         )
     )
@@ -308,10 +675,22 @@ def _build_source_mount(configuration: DockerConfiguration) -> str:
 
 
 def _build_container_environment(
+    configuration: DockerConfiguration,
     environment_variables: Mapping[str, str],
+    gateway_ip_address: str | None = None,
 ) -> dict[str, str]:
     container_environment = dict(environment_variables)
     container_environment["PYTHONPATH"] = _REMOTE_SOURCE_DIRECTORY
+    gateway = configuration.profile.network_gateway
+    if gateway is not None:
+        proxy_host = gateway_ip_address or gateway.proxy_host
+        proxy_url = f"http://{proxy_host}:{gateway.proxy_port}"
+        container_environment["HTTP_PROXY"] = proxy_url
+        container_environment["HTTPS_PROXY"] = proxy_url
+        container_environment["NO_PROXY"] = "localhost,127.0.0.1"
+        container_environment["http_proxy"] = proxy_url
+        container_environment["https_proxy"] = proxy_url
+        container_environment["no_proxy"] = "localhost,127.0.0.1"
     return container_environment
 
 

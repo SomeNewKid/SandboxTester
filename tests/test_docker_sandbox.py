@@ -10,13 +10,17 @@ from docker_sandbox.container_factory import _build_image_command
 from docker_sandbox.models import DockerConfiguration, DockerProfile
 from docker_sandbox.profiles import (
     BASELINE_IMAGE_NAME,
+    NETWORK_EGRESS_IMAGE_NAME,
     READONLY_FS_IMAGE_NAME,
     get_docker_profile,
 )
 from docker_sandbox.sandbox_container import (
+    _build_allowed_gateway_domains,
     _build_config_json,
     _build_container_script,
     _build_docker_run_command,
+    _build_gateway_start_commands,
+    _build_squid_configuration_text,
     _delete_readonly_denied_directory,
     _prepare_readonly_denied_directory,
     _resolve_environment_variables,
@@ -246,6 +250,146 @@ def test_readonly_fs_profile_writes_landlock_policy(tmp_path: Path) -> None:
     assert {"path": "/etc", "access": "r"} in policy["rules"]
     assert {"path": "/ms-playwright", "access": "rx"} in policy["rules"]
     assert {"path": "/usr", "access": "rx"} in policy["rules"]
+
+
+def test_network_egress_profile_starts_from_readonly_fs_profile() -> None:
+    """Verify network-egress begins as a readonly-fs clone."""
+    readonly_profile = get_docker_profile("readonly-fs")
+    network_profile = get_docker_profile("network-egress")
+
+    assert network_profile.image_name == NETWORK_EGRESS_IMAGE_NAME
+    assert network_profile.image_name != readonly_profile.image_name
+    assert (
+        network_profile.container_run_options == readonly_profile.container_run_options
+    )
+    assert network_profile.remote_run_root == readonly_profile.remote_run_root
+    assert (
+        network_profile.allowed_directory_template
+        == readonly_profile.allowed_directory_template
+    )
+    assert (
+        network_profile.denied_directory_template
+        == readonly_profile.denied_directory_template
+    )
+    assert (
+        network_profile.readonly_denied_mount_target
+        == readonly_profile.readonly_denied_mount_target
+    )
+    assert network_profile.landlock_rules == readonly_profile.landlock_rules
+    assert network_profile.network_gateway is not None
+
+
+def test_network_egress_profile_uses_internal_network_and_proxy(
+    tmp_path: Path,
+) -> None:
+    """Verify network-egress routes the sandbox through the gateway address."""
+    configuration = _create_configuration(
+        tmp_path, get_docker_profile("network-egress")
+    )
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=tmp_path / ".docker_sandbox" / "runs" / "run-test",
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+
+    assert "--network" in command
+    assert "sandbox-tester-net-test" in command
+    assert "HTTP_PROXY=http://172.20.0.2:3128" in command
+    assert "HTTPS_PROXY=http://172.20.0.2:3128" in command
+    assert "NO_PROXY=localhost,127.0.0.1" in command
+
+
+def test_network_egress_profile_can_fall_back_to_gateway_alias(
+    tmp_path: Path,
+) -> None:
+    """Verify network-egress still has a proxy host when inspection fails."""
+    configuration = _create_configuration(
+        tmp_path, get_docker_profile("network-egress")
+    )
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=tmp_path / ".docker_sandbox" / "runs" / "run-test",
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+    )
+
+    assert "HTTP_PROXY=http://egress-gateway:3128" in command
+    assert "HTTPS_PROXY=http://egress-gateway:3128" in command
+
+
+def test_gateway_start_commands_create_internal_network_and_sidecar(
+    tmp_path: Path,
+) -> None:
+    """Verify gateway startup uses a sidecar attached to a private network."""
+    squid_config_path = tmp_path / "squid.conf"
+
+    commands = _build_gateway_start_commands(
+        "ubuntu/squid:latest",
+        "sandbox-tester-gateway-test",
+        "sandbox-tester-net-test",
+        squid_config_path,
+    )
+
+    assert commands[0] == [
+        "docker",
+        "network",
+        "create",
+        "--internal",
+        "sandbox-tester-net-test",
+    ]
+    assert commands[1][:8] == [
+        "docker",
+        "run",
+        "--detach",
+        "--name",
+        "sandbox-tester-gateway-test",
+        "--network",
+        "bridge",
+        "--mount",
+    ]
+    assert commands[2] == [
+        "docker",
+        "network",
+        "connect",
+        "--alias",
+        "egress-gateway",
+        "sandbox-tester-net-test",
+        "sandbox-tester-gateway-test",
+    ]
+    assert commands[3][:4] == [
+        "docker",
+        "exec",
+        "sandbox-tester-gateway-test",
+        "/bin/sh",
+    ]
+    assert "squid -k check" in commands[3][-1]
+
+
+def test_squid_configuration_allows_normalized_domains() -> None:
+    """Verify gateway domains support suffix-style profile entries."""
+    domains = _build_allowed_gateway_domains(
+        ("*.openai.com", ".github.com"),
+        {
+            "allowed_domain": "example.com",
+            "git_remote_url": "https://github.com/SomeNewKid/ScratchpadOne.git",
+        },
+    )
+    config_text = _build_squid_configuration_text(domains, 3128)
+
+    assert ".openai.com" in domains
+    assert ".github.com" not in domains
+    assert "example.com" in domains
+    assert "github.com" in domains
+    assert "acl allowed_sites dstdomain" in config_text
+    assert "http_access deny all" in config_text
+    assert "access_log none" in config_text
+    assert "cache_log /tmp/squid-cache.log" in config_text
 
 
 def test_docker_run_command_forwards_environment_variable_by_name(

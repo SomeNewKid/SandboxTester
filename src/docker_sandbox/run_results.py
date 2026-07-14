@@ -30,9 +30,14 @@ def _create_metadata_data(result: DockerRunResult) -> dict[str, object]:
         "image_name": result.image_name,
         "profile_name": result.profile_name,
         "container_name": result.container_name,
+        "network_name": result.network_name,
+        "gateway_container_name": result.gateway_container_name,
         "exit_code": result.exit_code,
         "command": result.command,
         "remove_command": result.remove_command,
+        "gateway_commands": result.gateway_commands,
+        "gateway_ip_address": result.gateway_ip_address,
+        "gateway_cleanup_commands": result.gateway_cleanup_commands,
     }
 
 

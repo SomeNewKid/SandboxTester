@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from .models import DockerProfile, LandlockPathRule
+from .models import DockerProfile, LandlockPathRule, NetworkGatewayProfile
 
 BASELINE_PROFILE_NAME = "baseline"
 BASELINE_IMAGE_NAME = "sandbox-tester/docker-sandbox:baseline"
 READONLY_FS_PROFILE_NAME = "readonly-fs"
 READONLY_FS_IMAGE_NAME = "sandbox-tester/docker-sandbox:readonly-fs"
+NETWORK_EGRESS_PROFILE_NAME = "network-egress"
+NETWORK_EGRESS_IMAGE_NAME = "sandbox-tester/docker-sandbox:network-egress"
 
 _PROFILES: dict[str, DockerProfile] = {
     BASELINE_PROFILE_NAME: DockerProfile(
@@ -61,6 +63,62 @@ _PROFILES: dict[str, DockerProfile] = {
             LandlockPathRule("/sandbox-output", "rw"),
             LandlockPathRule("/sandbox-work", "rw"),
             LandlockPathRule("/tmp", "rw"),
+        ),
+    ),
+    NETWORK_EGRESS_PROFILE_NAME: DockerProfile(
+        name=NETWORK_EGRESS_PROFILE_NAME,
+        description=(
+            "Start from the readonly-fs hardening profile so network egress "
+            "controls can be added and measured independently."
+        ),
+        image_name=NETWORK_EGRESS_IMAGE_NAME,
+        container_run_options=(
+            "--read-only",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,noexec,size=2g",
+            "--tmpfs",
+            "/sandbox-work:rw,nosuid,nodev,noexec,size=256m",
+            "--env",
+            "HOME=/tmp/sandbox-home",
+            "--env",
+            "XDG_CACHE_HOME=/tmp/sandbox-cache",
+            "--env",
+            "XDG_CONFIG_HOME=/tmp/sandbox-config",
+            "--env",
+            "XDG_RUNTIME_DIR=/tmp/sandbox-runtime",
+        ),
+        remote_run_root="/sandbox-work",
+        allowed_directory_template="{remote_run_directory}/allowed",
+        denied_directory_template="/sandbox-denied",
+        readonly_denied_mount_target="/sandbox-denied",
+        landlock_rules=(
+            LandlockPathRule("/bin", "rx"),
+            LandlockPathRule("/etc", "r"),
+            LandlockPathRule("/lib", "rx"),
+            LandlockPathRule("/lib64", "rx"),
+            LandlockPathRule("/ms-playwright", "rx"),
+            LandlockPathRule("/opt/sandbox-tester", "rx"),
+            LandlockPathRule("/sbin", "rx"),
+            LandlockPathRule("/usr", "rx"),
+            LandlockPathRule("/var", "r"),
+            LandlockPathRule("/dev", "rw"),
+            LandlockPathRule("/proc", "r"),
+            LandlockPathRule("/sys", "r"),
+            LandlockPathRule("/sandbox-source", "r"),
+            LandlockPathRule("/sandbox-output", "rw"),
+            LandlockPathRule("/sandbox-work", "rw"),
+            LandlockPathRule("/tmp", "rw"),
+        ),
+        network_gateway=NetworkGatewayProfile(
+            image_name="ubuntu/squid:latest",
+            proxy_host="egress-gateway",
+            proxy_port=3128,
+            allowed_domains=(
+                ".openai.com",
+                "example.com",
+                ".github.com",
+                "github.com",
+            ),
         ),
     ),
 }

@@ -14,6 +14,16 @@ class LandlockPathRule:
 
 
 @dataclass(frozen=True)
+class NetworkGatewayProfile:
+    """Network egress gateway settings for a Docker profile."""
+
+    image_name: str
+    proxy_host: str
+    proxy_port: int
+    allowed_domains: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class DockerProfile:
     """Docker image and container hardening profile."""
 
@@ -27,6 +37,7 @@ class DockerProfile:
     denied_directory_template: str = "{remote_run_directory}/denied"
     readonly_denied_mount_target: str | None = None
     landlock_rules: tuple[LandlockPathRule, ...] = ()
+    network_gateway: NetworkGatewayProfile | None = None
 
 
 class DockerImageStatus(StrEnum):
@@ -73,9 +84,14 @@ class DockerRunResult:
     exit_code: int
     stdout: str
     stderr: str
+    network_name: str | None = None
+    gateway_container_name: str | None = None
+    gateway_ip_address: str | None = None
+    gateway_commands: list[list[str]] | None = None
+    gateway_cleanup_commands: list[list[str]] | None = None
 
     def remove_container(self) -> None:
-        """Remove the disposable Docker container for this run."""
+        """Remove disposable Docker resources for this run."""
         import subprocess
 
         subprocess.run(
@@ -84,3 +100,13 @@ class DockerRunResult:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        if self.gateway_cleanup_commands is None:
+            return
+
+        for command in self.gateway_cleanup_commands:
+            subprocess.run(
+                command,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )

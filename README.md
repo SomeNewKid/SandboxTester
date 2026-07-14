@@ -311,6 +311,18 @@ container-side path policy: trusted runtime and source paths are readable, image
 runtime paths are executable, writable data paths are not executable, and the
 denied fixture is not granted read or write access.
 
+The `network-egress` profile starts from the same Docker runtime options,
+fixture layout, and Landlock policy as `readonly-fs`, but uses the separate
+image tag `sandbox-tester/docker-sandbox:network-egress` so network egress
+controls can be introduced and measured independently. It creates a per-run
+internal Docker network, starts a Squid sidecar gateway container, connects the
+gateway to both Docker's normal bridge network and the internal run network,
+and starts the sandbox container only on the internal network with HTTP and
+HTTPS proxy environment variables pointing at the gateway. The Squid
+configuration is generated into the run directory from the profile's allowed
+domain list and the network-relevant values in the generated
+`CapabilityContext`.
+
 The file protocol for each Docker run is:
 
 ```text
