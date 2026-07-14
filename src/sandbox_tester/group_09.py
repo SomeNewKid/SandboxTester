@@ -18,7 +18,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -1238,12 +1238,19 @@ class G09_T10:
 
     _URL = "https://httpbin.org/bytes/128"
     _EXPECTED_SIZE_BYTES = 128
+    _RETRY_DELAYS_SECONDS = (2, 10)
 
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._shell_file = capability_context.allowed_directory / "g09_t10_shell.bin"
         self._tool_file = capability_context.allowed_directory / "g09_t10_tool.bin"
 
     async def run_shell(self) -> InvocationResult:
+        return await self._run_with_retries(
+            self._run_shell_once,
+            "Shell file download failed after 3 attempts.",
+        )
+
+    async def _run_shell_once(self) -> InvocationResult:
         self._delete_file_if_exists(self._shell_file)
 
         try:
@@ -1305,6 +1312,12 @@ class G09_T10:
             )
 
     async def run_tool(self) -> InvocationResult:
+        return await self._run_with_retries(
+            self._run_tool_once,
+            "Python runtime file download failed after 3 attempts.",
+        )
+
+    async def _run_tool_once(self) -> InvocationResult:
         self._delete_file_if_exists(self._tool_file)
 
         try:
@@ -1353,6 +1366,55 @@ class G09_T10:
                 summary="Tool invocation raised an exception.",
                 evidence=repr(error),
             )
+
+    async def _run_with_retries(
+        self,
+        operation: Callable[[], Awaitable[InvocationResult]],
+        failed_summary: str,
+    ) -> InvocationResult:
+        attempts: list[InvocationResult] = []
+
+        for attempt_index in range(len(self._RETRY_DELAYS_SECONDS) + 1):
+            result = await operation()
+            attempts.append(result)
+            if result.outcome in {Outcome.ALLOWED, Outcome.NOT_APPLICABLE}:
+                return self._with_attempt_evidence(result, attempts)
+
+            if attempt_index < len(self._RETRY_DELAYS_SECONDS):
+                await asyncio.sleep(self._RETRY_DELAYS_SECONDS[attempt_index])
+
+        final_result = attempts[-1]
+        return InvocationResult(
+            outcome=final_result.outcome,
+            summary=failed_summary,
+            evidence=self._attempts_evidence(attempts),
+        )
+
+    def _with_attempt_evidence(
+        self,
+        result: InvocationResult,
+        attempts: list[InvocationResult],
+    ) -> InvocationResult:
+        if len(attempts) == 1:
+            return result
+
+        return InvocationResult(
+            outcome=result.outcome,
+            summary=f"{result.summary} Succeeded on attempt {len(attempts)}.",
+            evidence=self._attempts_evidence(attempts),
+        )
+
+    def _attempts_evidence(self, attempts: list[InvocationResult]) -> str:
+        lines = []
+        for index, attempt in enumerate(attempts, start=1):
+            evidence = attempt.evidence or ""
+            compact_evidence = str(evidence).replace("\n", " | ")[:300]
+            lines.append(
+                f"attempt={index}; outcome={attempt.outcome.value}; "
+                f"summary={attempt.summary}; evidence={compact_evidence}"
+            )
+
+        return "\n".join(lines)[:1000]
 
     async def run_alternates(self) -> AlternateInvocationResult:
         alternate_file = self._shell_file.with_name("g09_t10_alternate.bin")

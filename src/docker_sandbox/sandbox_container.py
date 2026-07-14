@@ -15,6 +15,7 @@ from .models import DockerConfiguration, DockerRunResult
 
 _DOCKER_EXECUTABLE = "docker"
 _REMOTE_OUTPUT_DIRECTORY = "/sandbox-output"
+_REMOTE_LANDLOCK_POLICY_PATH = f"{_REMOTE_OUTPUT_DIRECTORY}/landlock-policy.json"
 _REMOTE_SOURCE_DIRECTORY = "/sandbox-source/src"
 _CONTAINER_NAME_PREFIX = "sandbox-tester-run"
 _READONLY_DENIED_SOURCE_DIRECTORY = "readonly-denied"
@@ -44,6 +45,7 @@ def run_sandbox_container(
     allowed_directory = _build_allowed_directory(configuration, remote_run_directory)
     denied_directory = _build_denied_directory(configuration, remote_run_directory)
     _prepare_readonly_denied_directory(configuration, run_directory)
+    _write_landlock_policy(configuration, run_directory)
     config_json = _build_config_json(
         remote_run_directory,
         allowed_directory,
@@ -138,6 +140,27 @@ def _prepare_readonly_denied_directory(
     denied_file.write_text(_DENIED_FILE_CONTENT, encoding="utf-8")
     hidden_file = denied_child_directory / ".hidden"
     hidden_file.write_text(_HIDDEN_DENIED_FILE_CONTENT, encoding="utf-8")
+
+
+def _write_landlock_policy(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+) -> None:
+    if not configuration.profile.landlock_rules:
+        return
+
+    policy = {
+        "rules": [
+            {
+                "path": rule.path,
+                "access": rule.access,
+            }
+            for rule in configuration.profile.landlock_rules
+        ],
+    }
+    policy_text = json.dumps(policy, indent=2)
+    policy_path = run_directory / "landlock-policy.json"
+    policy_path.write_text(f"{policy_text}\n", encoding="utf-8")
 
 
 def _delete_readonly_denied_directory(
@@ -265,6 +288,11 @@ def _build_docker_run_command(
                 ),
                 verbose=verbose,
                 serialize_evidence=serialize_evidence,
+                landlock_policy_path=(
+                    _REMOTE_LANDLOCK_POLICY_PATH
+                    if configuration.profile.landlock_rules
+                    else None
+                ),
             ),
         ]
     )
@@ -310,6 +338,7 @@ def _build_container_script(
     create_denied_fixture: bool = True,
     verbose: bool = False,
     serialize_evidence: bool = False,
+    landlock_policy_path: str | None = None,
 ) -> str:
     if allowed_directory is None:
         allowed_directory = f"{remote_run_directory}/allowed"
@@ -318,13 +347,7 @@ def _build_container_script(
 
     allowed_child_directory = f"{allowed_directory}/allowed"
     denied_child_directory = f"{denied_directory}/denied"
-    arguments = [
-        "python",
-        "-m",
-        "sandbox_tester",
-        "--config",
-        f"{_REMOTE_OUTPUT_DIRECTORY}/config.json",
-    ]
+    arguments = _build_sandbox_command_arguments(landlock_policy_path)
     if verbose:
         arguments.append("--verbose")
     if serialize_evidence:
@@ -369,6 +392,29 @@ def _build_container_script(
             ),
         )
     return "\n".join(lines)
+
+
+def _build_sandbox_command_arguments(
+    landlock_policy_path: str | None,
+) -> list[str]:
+    if landlock_policy_path is None:
+        return [
+            "python",
+            "-m",
+            "sandbox_tester",
+            "--config",
+            f"{_REMOTE_OUTPUT_DIRECTORY}/config.json",
+        ]
+
+    return [
+        "python",
+        "-m",
+        "docker_sandbox.landlock_runner",
+        "--config",
+        f"{_REMOTE_OUTPUT_DIRECTORY}/config.json",
+        "--policy",
+        landlock_policy_path,
+    ]
 
 
 def _build_write_text_command(path: str, content: str) -> str:

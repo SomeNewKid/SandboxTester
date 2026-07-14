@@ -6,6 +6,14 @@ from pathlib import Path
 
 
 @dataclass(frozen=True)
+class LandlockPathRule:
+    """Path rule for the container-side Landlock launcher."""
+
+    path: str
+    access: str
+
+
+@dataclass(frozen=True)
 class DockerProfile:
     """Docker image and container hardening profile."""
 
@@ -18,6 +26,7 @@ class DockerProfile:
     allowed_directory_template: str = "{remote_run_directory}/allowed"
     denied_directory_template: str = "{remote_run_directory}/denied"
     readonly_denied_mount_target: str | None = None
+    landlock_rules: tuple[LandlockPathRule, ...] = ()
 
 
 class DockerImageStatus(StrEnum):

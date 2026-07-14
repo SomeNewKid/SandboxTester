@@ -1,5 +1,6 @@
 """Tests for the Docker sandbox harness."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from docker_sandbox.sandbox_container import (
     _delete_readonly_denied_directory,
     _prepare_readonly_denied_directory,
     _resolve_environment_variables,
+    _write_landlock_policy,
 )
 
 
@@ -208,6 +210,8 @@ def test_readonly_fs_profile_uses_read_only_root_with_writable_tmp(
     assert "XDG_RUNTIME_DIR=/tmp/sandbox-runtime" in command
     assert "mkdir -p /sandbox-work/run-test/allowed/allowed" in command[-1]
     assert "mkdir -p /sandbox-denied/denied" not in command[-1]
+    assert "python -m docker_sandbox.landlock_runner" in command[-1]
+    assert "--policy /sandbox-output/landlock-policy.json" in command[-1]
 
 
 def test_readonly_denied_fixture_is_removed_after_run(tmp_path: Path) -> None:
@@ -223,6 +227,25 @@ def test_readonly_denied_fixture_is_removed_after_run(tmp_path: Path) -> None:
     _delete_readonly_denied_directory(configuration, run_directory)
 
     assert not denied_source_directory.exists()
+
+
+def test_readonly_fs_profile_writes_landlock_policy(tmp_path: Path) -> None:
+    """Verify the readonly-fs profile emits its Landlock path policy."""
+    configuration = _create_configuration(tmp_path, get_docker_profile("readonly-fs"))
+    run_directory = tmp_path / ".docker_sandbox" / "runs" / "run-test"
+    run_directory.mkdir(parents=True)
+
+    _write_landlock_policy(configuration, run_directory)
+
+    policy_path = run_directory / "landlock-policy.json"
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+
+    assert {"path": "/sandbox-work", "access": "rw"} in policy["rules"]
+    assert {"path": "/sandbox-denied", "access": "r"} not in policy["rules"]
+    assert {"path": "/", "access": "r"} not in policy["rules"]
+    assert {"path": "/etc", "access": "r"} in policy["rules"]
+    assert {"path": "/ms-playwright", "access": "rx"} in policy["rules"]
+    assert {"path": "/usr", "access": "rx"} in policy["rules"]
 
 
 def test_docker_run_command_forwards_environment_variable_by_name(

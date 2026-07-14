@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .models import DockerProfile
+from .models import DockerProfile, LandlockPathRule
 
 BASELINE_PROFILE_NAME = "baseline"
 BASELINE_IMAGE_NAME = "sandbox-tester/docker-sandbox:baseline"
@@ -44,6 +44,24 @@ _PROFILES: dict[str, DockerProfile] = {
         allowed_directory_template="{remote_run_directory}/allowed",
         denied_directory_template="/sandbox-denied",
         readonly_denied_mount_target="/sandbox-denied",
+        landlock_rules=(
+            LandlockPathRule("/bin", "rx"),
+            LandlockPathRule("/etc", "r"),
+            LandlockPathRule("/lib", "rx"),
+            LandlockPathRule("/lib64", "rx"),
+            LandlockPathRule("/ms-playwright", "rx"),
+            LandlockPathRule("/opt/sandbox-tester", "rx"),
+            LandlockPathRule("/sbin", "rx"),
+            LandlockPathRule("/usr", "rx"),
+            LandlockPathRule("/var", "r"),
+            LandlockPathRule("/dev", "rw"),
+            LandlockPathRule("/proc", "r"),
+            LandlockPathRule("/sys", "r"),
+            LandlockPathRule("/sandbox-source", "r"),
+            LandlockPathRule("/sandbox-output", "rw"),
+            LandlockPathRule("/sandbox-work", "rw"),
+            LandlockPathRule("/tmp", "rw"),
+        ),
     ),
 }
 

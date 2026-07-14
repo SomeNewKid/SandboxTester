@@ -285,9 +285,9 @@ Run the first read-only filesystem hardening profile:
 For each run, `docker_sandbox` creates a timestamped run directory under
 `.docker_sandbox/runs`, writes a Linux `CapabilityContext` to `config.json`,
 starts a named disposable container, bind-mounts the run directory at
-`/sandbox-output`, creates allowed and denied fixture directories under
-`/tmp/sandbox-tester`, runs `sandbox_tester`, saves stdout, stderr, metadata,
-and generated report artifacts, then removes the container. Use
+`/sandbox-output`, creates the profile's configured allowed and denied fixture
+directories, runs `sandbox_tester`, saves stdout, stderr, metadata, and
+generated report artifacts, then removes the container. Use
 `--keep-container` to leave the container available for inspection after
 execution.
 
@@ -305,7 +305,11 @@ directories for Python, Playwright, and Chromium, moves the writable work and
 allowed fixture tree to `/sandbox-work`, and mounts the denied fixture at
 `/sandbox-denied` as read-only. The writable tmpfs data mounts `/tmp` and
 `/sandbox-work` are mounted with `noexec` so newly written native executables
-or shell scripts cannot be launched directly from those paths.
+or shell scripts cannot be launched directly from those paths. The profile also
+starts `sandbox_tester` through a Landlock launcher that applies a
+container-side path policy: trusted runtime and source paths are readable, image
+runtime paths are executable, writable data paths are not executable, and the
+denied fixture is not granted read or write access.
 
 The file protocol for each Docker run is:
 
