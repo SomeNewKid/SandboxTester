@@ -118,7 +118,11 @@ _PROFILES: dict[str, DockerProfile] = {
                 "example.com",
                 ".github.com",
                 "github.com",
+                "gov.uk",
             ),
+            allowed_ip_addresses=(
+                # "1.1.1.1",
+            )
         ),
     ),
 }

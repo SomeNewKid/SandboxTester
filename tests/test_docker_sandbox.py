@@ -16,6 +16,7 @@ from docker_sandbox.profiles import (
 )
 from docker_sandbox.sandbox_container import (
     _build_allowed_gateway_domains,
+    _build_allowed_gateway_ip_addresses,
     _build_config_json,
     _build_container_script,
     _build_docker_run_command,
@@ -390,6 +391,40 @@ def test_squid_configuration_allows_normalized_domains() -> None:
     assert "http_access deny all" in config_text
     assert "access_log none" in config_text
     assert "cache_log /tmp/squid-cache.log" in config_text
+
+
+def test_squid_configuration_denies_ip_literal_destinations() -> None:
+    """Verify gateway policy blocks raw IPv4 and IPv6 URL targets by default."""
+    config_text = _build_squid_configuration_text(("example.com",), 3128)
+
+    assert "acl ipv4_literal_url url_regex" in config_text
+    assert "acl ipv4_literal_connect url_regex" in config_text
+    assert "acl ipv6_literal_url url_regex" in config_text
+    assert "acl ipv6_literal_connect url_regex" in config_text
+    assert "http_access deny ipv4_literal_url" in config_text
+    assert "http_access deny ipv4_literal_connect" in config_text
+    assert "http_access deny ipv6_literal_url" in config_text
+    assert "http_access deny ipv6_literal_connect" in config_text
+    assert "http_access allow allowed_sites" in config_text
+    assert config_text.index("http_access deny ipv4_literal_url") < config_text.index(
+        "http_access allow allowed_sites"
+    )
+
+
+def test_squid_configuration_allows_configured_ip_addresses() -> None:
+    """Verify configured IP addresses are allowed before IP literal denial."""
+    ip_addresses = _build_allowed_gateway_ip_addresses(
+        ("1.1.1.1", "[2606:4700:4700::1111]")
+    )
+    config_text = _build_squid_configuration_text(("example.com",), 3128, ip_addresses)
+
+    assert "1.1.1.1/32" in ip_addresses
+    assert "2606:4700:4700::1111/128" in ip_addresses
+    assert "acl allowed_ip_addresses dst" in config_text
+    assert "http_access allow allowed_ip_addresses" in config_text
+    assert config_text.index(
+        "http_access allow allowed_ip_addresses"
+    ) < config_text.index("http_access deny ipv4_literal_url")
 
 
 def test_docker_run_command_forwards_environment_variable_by_name(

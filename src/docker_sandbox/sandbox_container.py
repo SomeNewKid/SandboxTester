@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import ipaddress
 import json
 import os
 import shlex
@@ -224,7 +225,14 @@ def _write_squid_configuration(
     allowed_domains = _build_allowed_gateway_domains(
         gateway.allowed_domains, config_data
     )
-    squid_config = _build_squid_configuration_text(allowed_domains, gateway.proxy_port)
+    allowed_ip_addresses = _build_allowed_gateway_ip_addresses(
+        gateway.allowed_ip_addresses
+    )
+    squid_config = _build_squid_configuration_text(
+        allowed_domains,
+        gateway.proxy_port,
+        allowed_ip_addresses,
+    )
     squid_config_path = run_directory / _SQUID_CONFIGURATION_FILE_NAME
     squid_config_path.write_text(squid_config, encoding="utf-8")
 
@@ -278,21 +286,60 @@ def _remove_redundant_gateway_domain_suffixes(
     return tuple(filtered_domains)
 
 
+def _build_allowed_gateway_ip_addresses(
+    configured_ip_addresses: tuple[str, ...],
+) -> tuple[str, ...]:
+    ip_addresses = []
+    for ip_address in configured_ip_addresses:
+        normalized_ip_address = _normalize_gateway_ip_address(ip_address)
+        ip_addresses.append(normalized_ip_address)
+
+    return tuple(dict.fromkeys(ip_addresses))
+
+
+def _normalize_gateway_ip_address(ip_address: str) -> str:
+    normalized_ip_address = ip_address.strip().strip("[]")
+    network = ipaddress.ip_network(normalized_ip_address, strict=False)
+    return str(network)
+
+
 def _build_squid_configuration_text(
     allowed_domains: tuple[str, ...],
     proxy_port: int,
+    allowed_ip_addresses: tuple[str, ...] = (),
 ) -> str:
     domains = " ".join(allowed_domains)
-    return "\n".join(
+    lines = [
+        f"http_port {proxy_port}",
+        "acl SSL_ports port 443",
+        "acl Safe_ports port 80",
+        "acl Safe_ports port 443",
+        "acl CONNECT method CONNECT",
+        f"acl allowed_sites dstdomain {domains}",
+        r"acl ipv4_literal_url url_regex -i "
+        r"^[a-z][a-z0-9+.-]*://[0-9]+(\.[0-9]+){3}([:/]|$)",
+        r"acl ipv4_literal_connect url_regex -i ^[0-9]+(\.[0-9]+){3}:",
+        r"acl ipv6_literal_url url_regex -i "
+        r"^[a-z][a-z0-9+.-]*://\[[0-9a-f:.]+\]([:/]|$)",
+        r"acl ipv6_literal_connect url_regex -i ^\[[0-9a-f:.]+\]:",
+        "http_access deny !Safe_ports",
+        "http_access deny CONNECT !SSL_ports",
+    ]
+    if allowed_ip_addresses:
+        ip_addresses = " ".join(allowed_ip_addresses)
+        lines.extend(
+            [
+                f"acl allowed_ip_addresses dst {ip_addresses}",
+                "http_access allow allowed_ip_addresses",
+            ]
+        )
+
+    lines.extend(
         [
-            f"http_port {proxy_port}",
-            "acl SSL_ports port 443",
-            "acl Safe_ports port 80",
-            "acl Safe_ports port 443",
-            "acl CONNECT method CONNECT",
-            f"acl allowed_sites dstdomain {domains}",
-            "http_access deny !Safe_ports",
-            "http_access deny CONNECT !SSL_ports",
+            "http_access deny ipv4_literal_url",
+            "http_access deny ipv4_literal_connect",
+            "http_access deny ipv6_literal_url",
+            "http_access deny ipv6_literal_connect",
             "http_access allow allowed_sites",
             "http_access deny all",
             "access_log none",
@@ -300,6 +347,7 @@ def _build_squid_configuration_text(
             "",
         ]
     )
+    return "\n".join(lines)
 
 
 def _start_network_gateway(

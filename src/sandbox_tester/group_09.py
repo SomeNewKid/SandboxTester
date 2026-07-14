@@ -843,8 +843,9 @@ class G09_T07:
         try:
             completed = await asyncio.to_thread(self._run_shell_command)
             combined_output = f"{completed.stdout}\n{completed.stderr}".strip()
+            status_code = self._get_http_status_code(combined_output)
 
-            if completed.returncode == 0:
+            if completed.returncode == 0 and self._is_successful_status(status_code):
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
                     summary="Shell connected to the raw IP address.",
@@ -894,15 +895,30 @@ class G09_T07:
             with response:
                 evidence = f"url={response.url}, status={response.status}"
 
+            if not self._is_successful_status(response.status):
+                return InvocationResult(
+                    outcome=Outcome.DENIED,
+                    summary=(
+                        "Python runtime raw IP address response was not successful."
+                    ),
+                    evidence=evidence[:500],
+                )
+
             return InvocationResult(
                 outcome=Outcome.ALLOWED,
                 summary="Python runtime connected to the raw IP address.",
                 evidence=evidence[:500],
             )
         except urllib.error.HTTPError as error:
+            outcome = Outcome.ALLOWED
+            summary = "Python runtime reached the raw IP address."
+            if not self._is_successful_status(error.code):
+                outcome = Outcome.DENIED
+                summary = "Python runtime raw IP address response was not successful."
+
             return InvocationResult(
-                outcome=Outcome.ALLOWED,
-                summary="Python runtime reached the raw IP address.",
+                outcome=outcome,
+                summary=summary,
                 evidence=f"status={error.code}, reason={error.reason}"[:500],
             )
         except urllib.error.URLError as error:
@@ -962,6 +978,26 @@ class G09_T07:
         )
         opener = urllib.request.build_opener(_NoRedirectHandler)
         return opener.open(request, timeout=10)
+
+    def _get_http_status_code(self, output: str) -> int | None:
+        status_code = None
+        for line in output.splitlines():
+            parts = line.strip().split(maxsplit=2)
+            if len(parts) < 2 or not parts[0].startswith("HTTP/"):
+                continue
+
+            try:
+                status_code = int(parts[1])
+            except ValueError:
+                continue
+
+        return status_code
+
+    def _is_successful_status(self, status_code: int | None) -> bool:
+        if status_code is None:
+            return False
+
+        return 200 <= status_code < 400
 
     def _is_curl_missing(self, output: str) -> bool:
         missing_markers = (

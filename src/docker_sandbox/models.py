@@ -21,6 +21,7 @@ class NetworkGatewayProfile:
     proxy_host: str
     proxy_port: int
     allowed_domains: tuple[str, ...] = ()
+    allowed_ip_addresses: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
