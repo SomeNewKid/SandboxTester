@@ -16,7 +16,7 @@ dispute what the sandbox actually permits.
 
 ## What It Does
 
-The project now has three related command-line paths:
+The project now has five related command-line paths:
 
 - `sandbox_tester` is the test engine. It accepts a serialized
   `CapabilityContext`, runs capability groups, writes `status.ndjson`,
@@ -34,6 +34,10 @@ The project now has three related command-line paths:
   image to a disposable run disk, starts QEMU with user-mode SSH port
   forwarding, uploads and runs the selected Python agent, downloads Sandbox
   Tester artifacts, and stops the VM by default.
+- `docker_sandbox` is the Docker harness. It creates a reusable Playwright
+  Python base image if needed, starts a disposable Ubuntu-based Linux
+  container, prepares container fixtures, runs `sandbox_tester`, saves run
+  artifacts under `.docker_sandbox/runs`, and removes the container by default.
 
 Each capability is tested through three invocation paths:
 
@@ -61,11 +65,14 @@ The `sandbox_tester` capability groups cover:
 - desktop UI and browser session access
 - package, source control, database, cloud, and credential access
 - system administration, hardware, scheduling, and logging capabilities
+- local AI agent behavior
 
-The current implementation registers groups G01 through G22. Evidence is still
-captured inside result objects while tests run, but serialized reports replace
-`evidence` values with `"[REMOVED]"` unless `sandbox_tester` is run with
-`--serialize-evidence`.
+The current implementation registers groups G01 through G22, plus G30 for
+local AI agent behavior. G30 currently probes whether Python tool code can
+collect local environment details and receive a remote LLM summary through the
+OpenAI Responses API. Evidence is still captured inside result objects while
+tests run, but serialized reports replace `evidence` values with `"[REMOVED]"`
+unless `sandbox_tester` is run with `--serialize-evidence`.
 
 ## Requirements
 
@@ -73,12 +80,15 @@ captured inside result objects while tests run, but serialized reports replace
 - PowerShell on Windows.
 - Oracle VirtualBox, when using `virtualbox_sandbox`.
 - QEMU for Windows, when using `qemu_sandbox`.
+- Docker Desktop with Linux containers enabled, when using `docker_sandbox`.
 - An Ubuntu Server ISO, when creating a new VirtualBox base VM. The
   `virtualbox_sandbox` CLI accepts `--iso`, checks `SANDBOX_TESTER_ISO`, and
   then checks the Downloads directory.
 - A prepared Ubuntu qcow2 base image at
   `.qemu_sandbox/ubuntu-24.04-sandbox-base-16g.compact.qcow2`, when using
   `qemu_sandbox`.
+- Network access to pull the Playwright Python Docker base image, when the
+  `docker_sandbox` image is first created.
 - Any deployment-specific test resources configured in `src/local_sandbox/cli.py`,
   such as a mounted/shared directory.
 
@@ -243,9 +253,78 @@ The file protocol for each QEMU run is:
   ubuntu-24.04-sandbox-run.qcow2  # only retained with --keep-vm
 ```
 
+## Running In Docker
+
+The Docker workflow uses a reusable base image and a disposable container for
+each Sandbox Tester run. If the selected profile image does
+not exist, the harness builds it from
+`src/docker_sandbox/dockerfile/Dockerfile`. The image is based on the
+Playwright Python Ubuntu image so Chromium-based browser probes can run inside
+the container. The image contains runtime dependencies, while the current
+project `src` tree is mounted into each disposable container as read-only source
+so code changes do not require rebuilding the image.
+
+Run the `sandbox_tester` agent in a disposable Docker container:
+
+```powershell
+.\.venv\Scripts\python.exe -m docker_sandbox
+```
+
+To serialize captured evidence from the container report:
+
+```powershell
+.\.venv\Scripts\python.exe -m docker_sandbox --serialize-evidence
+```
+
+Run the first read-only filesystem hardening profile:
+
+```powershell
+.\.venv\Scripts\python.exe -m docker_sandbox --profile readonly-fs
+```
+
+For each run, `docker_sandbox` creates a timestamped run directory under
+`.docker_sandbox/runs`, writes a Linux `CapabilityContext` to `config.json`,
+starts a named disposable container, bind-mounts the run directory at
+`/sandbox-output`, creates allowed and denied fixture directories under
+`/tmp/sandbox-tester`, runs `sandbox_tester`, saves stdout, stderr, metadata,
+and generated report artifacts, then removes the container. Use
+`--keep-container` to leave the container available for inspection after
+execution.
+
+The Docker harness forwards configured environment variables into the container.
+Currently `OPENAI_API_KEY` is configured as `[local]`, which means the value is
+copied from the host environment when present. The Docker command records only
+the variable name, not the secret value, in run metadata.
+
+The `baseline` profile uses `sandbox-tester/docker-sandbox:baseline` and keeps
+the original Docker runtime behavior. The `readonly-fs` profile uses
+`sandbox-tester/docker-sandbox:readonly-fs`, starts the container with a
+read-only root filesystem, keeps `/sandbox-output` writable through the run
+artifact bind mount, provides writable `/tmp`-backed HOME and XDG runtime
+directories for Python, Playwright, and Chromium, moves the writable work and
+allowed fixture tree to `/sandbox-work`, and mounts the denied fixture at
+`/sandbox-denied` as read-only. The writable tmpfs data mounts `/tmp` and
+`/sandbox-work` are mounted with `noexec` so newly written native executables
+or shell scripts cannot be launched directly from those paths.
+
+The file protocol for each Docker run is:
+
+```text
+.docker_sandbox/runs/run-YYYY-mm-dd-HH-MM-SS/
+  config.json
+  report.json
+  stderr.txt
+  stdout.txt
+  status.ndjson
+  done.json
+  run-metadata.json
+  playwright_shell_screenshot.png
+  playwright_tool_screenshot.png
+```
+
 ## Architecture
 
-The project is split into three packages:
+The project is split into five packages:
 
 - `sandbox_tester`: the sandbox-side test engine. It owns the capability
   context model, result models, reporters, capability group registration,
@@ -262,12 +341,17 @@ The project is split into three packages:
   creation from a prepared qcow2 base image, QEMU process lifecycle, guest
   credentials, user-mode SSH port forwarding, agent execution, artifact
   download, and VM teardown.
+- `docker_sandbox`: the Docker orchestration harness. It manages Docker image
+  creation, disposable container execution, container fixture setup, environment
+  variable forwarding, mounted artifact output, run metadata, and container
+  teardown.
 
 `local_sandbox` still invokes `sandbox_tester` locally as the current user.
 `virtualbox_sandbox` and `qemu_sandbox` exercise the same file-based boundary
 across an SSH connection into a disposable Ubuntu guest, so the host prepares
 the guest environment and the guest agent tests the capabilities available
-inside that VM.
+inside that VM. `docker_sandbox` exercises a similar file-based boundary inside
+a disposable Linux container using a bind-mounted artifact directory.
 
 ## Configuration
 
@@ -302,6 +386,13 @@ flags such as `--base-directory`, `--base-image`, `--kernel`, `--initrd`,
 and `--serialize-evidence`. The implementation uses the existing Python agent
 profile and guest runner shared with `virtualbox_sandbox`.
 
+For Docker runs, configuration is exposed through `src/docker_sandbox/cli.py`
+flags such as `--base-directory`, `--profile`, `--dockerfile`, `--guest-user`,
+`--keep-container`, `--verbose`, and `--serialize-evidence`. Each profile owns
+its Docker image tag; the default `baseline` profile uses
+`sandbox-tester/docker-sandbox:baseline`. The default base directory is
+`.docker_sandbox`, and the default container user is `sandbox`.
+
 ## Development Checks
 
 Run formatting, linting, type checking, and tests:
@@ -330,6 +421,7 @@ src/sandbox_tester/
   group_01.py     Runtime identity and execution context tests
   ...
   group_22.py     Logging, telemetry, and audit visibility tests
+  group_30.py     Local AI agent tests
 
 src/local_sandbox/
   __main__.py     Package entry point for python -m local_sandbox
@@ -357,10 +449,20 @@ src/qemu_sandbox/
   run_results.py              Local run artifact persistence
   models.py                   QEMU orchestration dataclasses
 
+src/docker_sandbox/
+  __main__.py                 Package entry point for python -m docker_sandbox
+  cli.py                      Docker command-line orchestration
+  container_factory.py        Docker image inspection and build operations
+  sandbox_container.py        Disposable container execution and fixture setup
+  run_results.py              Local run artifact persistence
+  models.py                   Docker orchestration dataclasses
+  dockerfile/Dockerfile       Playwright Python image used for container runs
+
 tests/
   test_smoke.py
   test_redaction.py
   test_runner_serialization.py
+  test_docker_sandbox.py
 
 scripts/
   setup-dev.ps1

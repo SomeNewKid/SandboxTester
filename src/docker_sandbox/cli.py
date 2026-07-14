@@ -12,12 +12,13 @@ from .models import (
     DockerImageStatus,
     DockerRunResult,
 )
+from .profiles import BASELINE_PROFILE_NAME, SUPPORTED_PROFILE_NAMES, get_docker_profile
 from .run_results import save_run_results
 from .sandbox_container import run_sandbox_container
 
 _DEFAULT_BASE_DIRECTORY = Path(".docker_sandbox")
-_DEFAULT_IMAGE_NAME = "sandbox-tester/docker-sandbox:dev"
 _DEFAULT_DOCKERFILE = Path("src") / "docker_sandbox" / "dockerfile" / "Dockerfile"
+_DEFAULT_GUEST_USER = "sandbox"
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -61,18 +62,24 @@ def _parse_arguments(arguments: list[str] | None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--image",
-        default=_DEFAULT_IMAGE_NAME,
-        help=(
-            "Docker image tag for the sandbox base image. "
-            f"Default: {_DEFAULT_IMAGE_NAME}"
-        ),
-    )
-    parser.add_argument(
         "--dockerfile",
         type=Path,
         default=_DEFAULT_DOCKERFILE,
         help=f"Dockerfile used to build the image. Default: {_DEFAULT_DOCKERFILE}",
+    )
+    parser.add_argument(
+        "--guest-user",
+        default=_DEFAULT_GUEST_USER,
+        help=(
+            "Container user used to run Sandbox Tester. The default image creates "
+            f"this user as '{_DEFAULT_GUEST_USER}'."
+        ),
+    )
+    parser.add_argument(
+        "--profile",
+        choices=SUPPORTED_PROFILE_NAMES,
+        default=BASELINE_PROFILE_NAME,
+        help=(f"Docker hardening profile to apply. Default: {BASELINE_PROFILE_NAME}"),
     )
     parser.add_argument(
         "--keep-container",
@@ -101,11 +108,13 @@ def _configuration_from_arguments(
     if not dockerfile_path.is_absolute():
         dockerfile_path = repository_root / dockerfile_path
 
+    profile = get_docker_profile(arguments.profile)
     return DockerConfiguration(
         base_directory=base_directory,
-        image_name=arguments.image,
         dockerfile_path=dockerfile_path.resolve(),
         build_context=repository_root,
+        guest_user=arguments.guest_user,
+        profile=profile,
     )
 
 

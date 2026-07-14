@@ -28,6 +28,7 @@ def _create_metadata_data(result: DockerRunResult) -> dict[str, object]:
     return {
         "timestamp_utc": datetime.now(UTC).isoformat(),
         "image_name": result.image_name,
+        "profile_name": result.profile_name,
         "container_name": result.container_name,
         "exit_code": result.exit_code,
         "command": result.command,

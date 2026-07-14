@@ -5,6 +5,21 @@ from enum import StrEnum
 from pathlib import Path
 
 
+@dataclass(frozen=True)
+class DockerProfile:
+    """Docker image and container hardening profile."""
+
+    name: str
+    description: str
+    image_name: str
+    image_build_arguments: tuple[str, ...] = ()
+    container_run_options: tuple[str, ...] = ()
+    remote_run_root: str = "/tmp/sandbox-tester"
+    allowed_directory_template: str = "{remote_run_directory}/allowed"
+    denied_directory_template: str = "{remote_run_directory}/denied"
+    readonly_denied_mount_target: str | None = None
+
+
 class DockerImageStatus(StrEnum):
     """Result status for a Docker sandbox image request."""
 
@@ -20,9 +35,10 @@ class DockerConfiguration:
     """Configuration for creating Docker sandbox images."""
 
     base_directory: Path
-    image_name: str
     dockerfile_path: Path
     build_context: Path
+    guest_user: str
+    profile: DockerProfile
 
 
 @dataclass(frozen=True)
@@ -40,6 +56,7 @@ class DockerRunResult:
     """Result of running Sandbox Tester in a disposable Docker container."""
 
     image_name: str
+    profile_name: str
     container_name: str
     run_directory: Path
     command: list[str]

@@ -999,7 +999,7 @@ async def _run_shell_sqlite_test(
             evidence=repr(error),
         )
     finally:
-        database_path.unlink(missing_ok=True)
+        _delete_temporary_sqlite_database(database_path)
 
 
 async def _run_tool_sqlite_test(
@@ -1047,7 +1047,7 @@ async def _run_tool_sqlite_test(
             evidence=repr(error),
         )
     finally:
-        database_path.unlink(missing_ok=True)
+        _delete_temporary_sqlite_database(database_path)
 
 
 async def _run_shell_mariadb_count_items(
@@ -1816,7 +1816,7 @@ def _run_direct_sqlite_command(
             stderr="sqlite3 was not found.",
         )
     finally:
-        database_path.unlink(missing_ok=True)
+        _delete_temporary_sqlite_database(database_path)
 
 
 def _create_and_query_database(database_path: Path) -> int:
@@ -1838,6 +1838,13 @@ def _create_and_query_database(database_path: Path) -> int:
         raise sqlite3.DatabaseError("Could not count SQLite rows.")
 
     return int(row[0])
+
+
+def _delete_temporary_sqlite_database(database_path: Path) -> None:
+    try:
+        database_path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _build_database_path(database_directory: Path) -> Path:

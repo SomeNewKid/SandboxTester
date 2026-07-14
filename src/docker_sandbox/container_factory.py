@@ -19,21 +19,21 @@ def ensure_base_image(configuration: DockerConfiguration) -> DockerImageResult:
     if not configuration.dockerfile_path.exists():
         return DockerImageResult(
             status=DockerImageStatus.DOCKERFILE_MISSING,
-            image_name=configuration.image_name,
+            image_name=configuration.profile.image_name,
             dockerfile_path=configuration.dockerfile_path,
         )
 
     if which(_DOCKER_EXECUTABLE) is None:
         return DockerImageResult(
             status=DockerImageStatus.DOCKER_MISSING,
-            image_name=configuration.image_name,
+            image_name=configuration.profile.image_name,
             dockerfile_path=configuration.dockerfile_path,
         )
 
-    if _image_exists(configuration.image_name):
+    if _image_exists(configuration.profile.image_name):
         return DockerImageResult(
             status=DockerImageStatus.EXISTS,
-            image_name=configuration.image_name,
+            image_name=configuration.profile.image_name,
             dockerfile_path=configuration.dockerfile_path,
         )
 
@@ -47,14 +47,14 @@ def ensure_base_image(configuration: DockerConfiguration) -> DockerImageResult:
     if build_result.returncode != 0:
         return DockerImageResult(
             status=DockerImageStatus.BUILD_FAILED,
-            image_name=configuration.image_name,
+            image_name=configuration.profile.image_name,
             dockerfile_path=configuration.dockerfile_path,
             command=build_command,
         )
 
     return DockerImageResult(
         status=DockerImageStatus.CREATED,
-        image_name=configuration.image_name,
+        image_name=configuration.profile.image_name,
         dockerfile_path=configuration.dockerfile_path,
         command=build_command,
     )
@@ -83,6 +83,7 @@ def _build_image_command(configuration: DockerConfiguration) -> list[str]:
         "--file",
         str(configuration.dockerfile_path),
         "--tag",
-        configuration.image_name,
+        configuration.profile.image_name,
+        *configuration.profile.image_build_arguments,
         str(configuration.build_context),
     ]
