@@ -10,10 +10,17 @@ import shlex
 import shutil
 import subprocess
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
-from .models import DockerConfiguration, DockerRunResult
+from .models import (
+    AgentSocketForward,
+    BrowserDebuggingProfile,
+    DockerConfiguration,
+    DockerRunResult,
+    EnvironmentVariablePolicy,
+    SocketMount,
+)
 
 _DOCKER_EXECUTABLE = "docker"
 _REMOTE_OUTPUT_DIRECTORY = "/sandbox-output"
@@ -26,6 +33,7 @@ _READONLY_DENIED_SOURCE_DIRECTORY = "readonly-denied"
 _SQUID_CONFIGURATION_FILE_NAME = "squid.conf"
 _GATEWAY_START_RESULTS_FILE_NAME = "gateway-start-results.json"
 _GATEWAY_LOG_FILE_NAME = "gateway-logs.json"
+_DENIED_EXECUTABLE_SOURCE_DIRECTORY = "denied-executables"
 _ALLOWED_FILE_CONTENT = "This is a test file for the allowed directory."
 _DENIED_FILE_CONTENT = "This is a test file for the denied directory."
 _HIDDEN_ALLOWED_FILE_CONTENT = "This is a hidden file."
@@ -54,12 +62,15 @@ def run_sandbox_container(
     allowed_directory = _build_allowed_directory(configuration, remote_run_directory)
     denied_directory = _build_denied_directory(configuration, remote_run_directory)
     _prepare_readonly_denied_directory(configuration, run_directory)
+    _prepare_denied_executable_stubs(configuration, run_directory)
     _write_landlock_policy(configuration, run_directory)
     config_data = _build_config_data(
         remote_run_directory,
         allowed_directory,
         denied_directory,
         configuration.guest_user,
+        _get_container_ssh_agent_socket(configuration),
+        configuration.profile.browser_debugging,
     )
     _write_squid_configuration(configuration, run_directory, config_data)
     config_path = run_directory / "config.json"
@@ -98,6 +109,7 @@ def run_sandbox_container(
     )
     _write_gateway_logs(configuration, run_directory, gateway_container_name)
     _delete_readonly_denied_directory(configuration, run_directory)
+    _delete_denied_executable_directory(configuration, run_directory)
     remove_command = _build_docker_remove_command(container_name)
     gateway_cleanup_commands = _build_gateway_cleanup_commands(
         configuration,
@@ -190,6 +202,64 @@ def _prepare_readonly_denied_directory(
     denied_file.write_text(_DENIED_FILE_CONTENT, encoding="utf-8")
     hidden_file = denied_child_directory / ".hidden"
     hidden_file.write_text(_HIDDEN_DENIED_FILE_CONTENT, encoding="utf-8")
+
+
+def _prepare_denied_executable_stubs(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+) -> None:
+    denied_targets = _get_denied_executable_targets(configuration)
+    if not denied_targets:
+        return
+
+    stub_directory = run_directory / _DENIED_EXECUTABLE_SOURCE_DIRECTORY
+    stub_directory.mkdir(parents=True, exist_ok=True)
+    for target_path in denied_targets:
+        stub_path = stub_directory / _build_denied_executable_stub_name(target_path)
+        stub_path.write_text(
+            _build_denied_executable_stub_text(PurePosixPath(target_path).name),
+            encoding="utf-8",
+        )
+        stub_path.chmod(0o755)
+
+
+def _build_denied_executable_stub_text(executable_name: str) -> str:
+    return (
+        "#!/bin/sh\n"
+        f"echo {shlex.quote(executable_name)}: denied by sandbox profile >&2\n"
+        "exit 127\n"
+    )
+
+
+def _validate_executable_name(executable_name: str) -> None:
+    if not executable_name or "/" in executable_name or "\\" in executable_name:
+        raise ValueError(f"Invalid executable name: {executable_name!r}")
+
+
+def _validate_executable_path(executable_path: str) -> None:
+    path = PurePosixPath(executable_path)
+    if not path.is_absolute() or path.name in {"", ".", ".."}:
+        raise ValueError(f"Invalid executable path: {executable_path!r}")
+
+
+def _build_denied_executable_stub_name(target_path: str) -> str:
+    _validate_executable_path(target_path)
+    return target_path.strip("/").replace("/", "__")
+
+
+def _get_denied_executable_targets(
+    configuration: DockerConfiguration,
+) -> tuple[str, ...]:
+    targets = []
+    for executable_name in configuration.profile.denied_executables:
+        _validate_executable_name(executable_name)
+        targets.append(f"/usr/bin/{executable_name}")
+
+    for executable_path in configuration.profile.denied_executable_paths:
+        _validate_executable_path(executable_path)
+        targets.append(executable_path)
+
+    return tuple(dict.fromkeys(targets))
 
 
 def _write_landlock_policy(
@@ -576,11 +646,33 @@ def _delete_readonly_denied_directory(
     shutil.rmtree(denied_source_directory, ignore_errors=True)
 
 
+def _delete_denied_executable_directory(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+) -> None:
+    if not _get_denied_executable_targets(configuration):
+        return
+
+    stub_directory = run_directory / _DENIED_EXECUTABLE_SOURCE_DIRECTORY
+    resolved_run_directory = run_directory.resolve()
+    resolved_stub_directory = stub_directory.resolve()
+
+    if resolved_run_directory not in resolved_stub_directory.parents:
+        raise RuntimeError(
+            "Refusing to remove denied executable stubs outside the run "
+            f"directory: {resolved_stub_directory}"
+        )
+
+    shutil.rmtree(stub_directory, ignore_errors=True)
+
+
 def _build_config_data(
     remote_run_directory: str,
     allowed_directory: str,
     denied_directory: str,
     guest_user: str,
+    ssh_agent_socket: str | None = None,
+    browser_debugging: BrowserDebuggingProfile | None = None,
 ) -> dict[str, object]:
     return {
         "working_directory": remote_run_directory,
@@ -609,10 +701,10 @@ def _build_config_data(
         "http_exfiltration_header": "exfiltration=example",
         "websocket_exfiltration_url": "wss://echo.websocket.org",
         "smtp_exfiltration_url": None,
-        "ssh_agent_socket": None,
-        "browser_debugging_url": None,
-        "browser_executable": None,
-        "existing_browser_profile": None,
+        "ssh_agent_socket": ssh_agent_socket,
+        "browser_debugging_url": _get_browser_debugging_url(browser_debugging),
+        "browser_executable": _get_browser_executable(browser_debugging),
+        "existing_browser_profile": _get_existing_browser_profile(browser_debugging),
         "allowed_git_repository": None,
         "denied_git_repository": None,
         "git_remote_url": _GIT_REMOTE_URL,
@@ -627,14 +719,45 @@ def _build_config_json(
     allowed_directory: str,
     denied_directory: str,
     guest_user: str,
+    ssh_agent_socket: str | None = None,
+    browser_debugging: BrowserDebuggingProfile | None = None,
 ) -> str:
     config = _build_config_data(
         remote_run_directory,
         allowed_directory,
         denied_directory,
         guest_user,
+        ssh_agent_socket,
+        browser_debugging,
     )
     return f"{json.dumps(config, indent=2)}\n"
+
+
+def _get_browser_debugging_url(
+    browser_debugging: BrowserDebuggingProfile | None,
+) -> str | None:
+    if browser_debugging is None:
+        return None
+
+    return browser_debugging.debugging_url
+
+
+def _get_browser_executable(
+    browser_debugging: BrowserDebuggingProfile | None,
+) -> str | None:
+    if browser_debugging is None:
+        return None
+
+    return browser_debugging.browser_executable
+
+
+def _get_existing_browser_profile(
+    browser_debugging: BrowserDebuggingProfile | None,
+) -> str | None:
+    if browser_debugging is None:
+        return None
+
+    return browser_debugging.existing_browser_profile
 
 
 def _build_docker_run_command(
@@ -659,18 +782,26 @@ def _build_docker_run_command(
         "--name",
         container_name,
         "--init",
-        "--ipc=host",
-        "--mount",
-        mount,
-        "--mount",
-        source_mount,
-        "--user",
-        configuration.guest_user,
     ]
+    command.extend(_build_ipc_options(configuration))
+    command.extend(_build_security_options(configuration))
+    command.extend(
+        [
+            "--mount",
+            mount,
+            "--mount",
+            source_mount,
+            "--user",
+            configuration.guest_user,
+        ]
+    )
     if network_name is not None:
         command.extend(["--network", network_name])
     command.extend(configuration.profile.container_run_options)
     command.extend(_build_readonly_denied_mount_options(configuration, run_directory))
+    command.extend(_build_socket_mount_options(configuration))
+    command.extend(_build_agent_socket_mount_options(configuration))
+    command.extend(_build_denied_executable_mount_options(configuration, run_directory))
     command.extend(
         _build_environment_options(
             _build_container_environment(
@@ -714,6 +845,37 @@ def _build_docker_run_command(
     return command
 
 
+def _build_ipc_options(configuration: DockerConfiguration) -> list[str]:
+    options = []
+    if configuration.profile.ipc_mode is not None:
+        options.append(f"--ipc={configuration.profile.ipc_mode}")
+
+    if configuration.profile.shm_size is not None:
+        options.extend(["--shm-size", configuration.profile.shm_size])
+
+    return options
+
+
+def _build_security_options(configuration: DockerConfiguration) -> list[str]:
+    options = []
+    if configuration.profile.cgroupns_mode is not None:
+        options.append(f"--cgroupns={configuration.profile.cgroupns_mode}")
+
+    if configuration.profile.pids_limit is not None:
+        options.extend(["--pids-limit", str(configuration.profile.pids_limit)])
+
+    for capability in configuration.profile.cap_drop:
+        options.append(f"--cap-drop={capability}")
+
+    for capability in configuration.profile.cap_add:
+        options.append(f"--cap-add={capability}")
+
+    for security_option in configuration.profile.security_options:
+        options.extend(["--security-opt", security_option])
+
+    return options
+
+
 def _build_source_mount(configuration: DockerConfiguration) -> str:
     source_directory = configuration.build_context / "src"
     return (
@@ -729,6 +891,18 @@ def _build_container_environment(
 ) -> dict[str, str]:
     container_environment = dict(environment_variables)
     container_environment["PYTHONPATH"] = _REMOTE_SOURCE_DIRECTORY
+    ssh_agent_socket = _get_container_ssh_agent_socket(configuration)
+    if ssh_agent_socket is not None:
+        container_environment["SSH_AUTH_SOCK"] = ssh_agent_socket
+
+    gpg_home = _get_container_gpg_home(configuration)
+    if gpg_home is not None:
+        container_environment["GNUPGHOME"] = gpg_home
+
+    _apply_environment_policies(
+        container_environment,
+        configuration.profile.environment,
+    )
     gateway = configuration.profile.network_gateway
     if gateway is not None:
         proxy_host = gateway_ip_address or gateway.proxy_host
@@ -740,6 +914,18 @@ def _build_container_environment(
         container_environment["https_proxy"] = proxy_url
         container_environment["no_proxy"] = "localhost,127.0.0.1"
     return container_environment
+
+
+def _apply_environment_policies(
+    environment: dict[str, str],
+    policies: tuple[EnvironmentVariablePolicy, ...],
+) -> None:
+    for policy in policies:
+        if policy.value is None:
+            environment.pop(policy.name, None)
+            continue
+
+        environment[policy.name] = policy.value
 
 
 def _build_readonly_denied_mount_options(
@@ -756,6 +942,100 @@ def _build_readonly_denied_mount_options(
         "--mount",
         mount,
     ]
+
+
+def _build_socket_mount_options(configuration: DockerConfiguration) -> list[str]:
+    options = []
+    for socket_mount in configuration.profile.socket_mounts:
+        options.extend(
+            [
+                "--mount",
+                _build_socket_mount_option(socket_mount),
+            ]
+        )
+
+    return options
+
+
+def _build_agent_socket_mount_options(configuration: DockerConfiguration) -> list[str]:
+    options = []
+    for agent_socket in _get_agent_socket_forwards(configuration):
+        options.extend(
+            [
+                "--mount",
+                _build_agent_socket_mount_option(agent_socket),
+            ]
+        )
+
+    return options
+
+
+def _get_agent_socket_forwards(
+    configuration: DockerConfiguration,
+) -> tuple[AgentSocketForward, ...]:
+    forwards = []
+    if configuration.profile.ssh_agent_socket is not None:
+        forwards.append(configuration.profile.ssh_agent_socket)
+
+    if configuration.profile.gpg_agent_socket is not None:
+        forwards.append(configuration.profile.gpg_agent_socket)
+
+    return tuple(forwards)
+
+
+def _build_agent_socket_mount_option(agent_socket: AgentSocketForward) -> str:
+    return (
+        f"type=bind,source={agent_socket.source_path},target={agent_socket.target_path}"
+    )
+
+
+def _build_denied_executable_mount_options(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+) -> list[str]:
+    options = []
+    for target_path in _get_denied_executable_targets(configuration):
+        source_path = (
+            run_directory
+            / _DENIED_EXECUTABLE_SOURCE_DIRECTORY
+            / _build_denied_executable_stub_name(target_path)
+        )
+        options.extend(
+            [
+                "--mount",
+                f"type=bind,source={source_path},target={target_path},readonly",
+            ]
+        )
+
+    return options
+
+
+def _build_socket_mount_option(socket_mount: SocketMount) -> str:
+    mount = (
+        f"type=bind,source={socket_mount.source_path},target={socket_mount.target_path}"
+    )
+    if socket_mount.readonly:
+        mount = f"{mount},readonly"
+
+    return mount
+
+
+def _get_container_ssh_agent_socket(
+    configuration: DockerConfiguration,
+) -> str | None:
+    ssh_agent_socket = configuration.profile.ssh_agent_socket
+    if ssh_agent_socket is None:
+        return None
+
+    return ssh_agent_socket.target_path
+
+
+def _get_container_gpg_home(configuration: DockerConfiguration) -> str | None:
+    gpg_agent_socket = configuration.profile.gpg_agent_socket
+    if gpg_agent_socket is None:
+        return None
+
+    return str(PurePosixPath(gpg_agent_socket.target_path).parent)
 
 
 def _build_container_script(
@@ -785,6 +1065,12 @@ def _build_container_script(
         'if [ -n "${HOME:-}" ]; then mkdir -p "$HOME"; fi',
         'if [ -n "${XDG_CACHE_HOME:-}" ]; then mkdir -p "$XDG_CACHE_HOME"; fi',
         'if [ -n "${XDG_CONFIG_HOME:-}" ]; then mkdir -p "$XDG_CONFIG_HOME"; fi',
+        (
+            'if [ -n "${GNUPGHOME:-}" ]; then '
+            'mkdir -p "$GNUPGHOME"; '
+            'chmod 700 "$GNUPGHOME"; '
+            "fi"
+        ),
         (
             'if [ -n "${XDG_RUNTIME_DIR:-}" ]; then '
             'mkdir -p "$XDG_RUNTIME_DIR"; '

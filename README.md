@@ -323,6 +323,39 @@ configuration is generated into the run directory from the profile's allowed
 domain list and the network-relevant values in the generated
 `CapabilityContext`.
 
+The `ambient-services` profile starts from the same read-only filesystem,
+Landlock, and Squid proxy sidecar settings as `network-egress`, but uses the
+separate image tag `sandbox-tester/docker-sandbox:ambient-services` so local
+service and IPC isolation controls can be introduced and measured independently.
+It runs with a private IPC namespace instead of host IPC and gives Chromium a
+bounded private shared-memory area through Docker's `--shm-size` setting.
+The profile also inherits opt-out Docker guards that drop all Linux
+capabilities, set `no-new-privileges`, use a private cgroup namespace, and
+limit the number of container processes.
+Host service sockets, such as Docker runtime sockets or SSH agent sockets, are
+not mounted by default; future exceptions are intended to be declared as
+explicit profile socket mounts. SSH and GPG agent sockets are also explicit
+profile opt-ins: when configured, the harness mounts only the declared socket
+and injects the matching container-side `SSH_AUTH_SOCK` or `GNUPGHOME` value.
+Browser debugging surfaces are disabled by default: no debugging URL, direct
+browser executable, or existing browser profile is advertised to
+`sandbox_tester` unless the profile explicitly opts in.
+The profile also scrubs common ambient session variables such as SSH agent,
+GPG agent, D-Bus, X11, and Wayland hints, while giving GPG tooling an isolated
+temporary home inside the container.
+GPG, SSH, D-Bus, and Linux service-management command-line tools are denied by
+profile-controlled bind-mounted stubs unless a future profile opts back in.
+
+The `execution-control` profile starts from the same Docker runtime options,
+Landlock policy, Squid proxy sidecar, ambient-service controls, and default
+denied service tools as `ambient-services`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:execution-control` so process and executable
+controls can be added and measured independently. It expands the profile's
+bind-mounted executable denial list to cover common package managers,
+source-control tools, admin and namespace tools, scheduling helpers, extra
+interpreters, and background-process helpers while leaving Python, `/bin/sh`,
+Playwright, and Chromium available for the tester itself.
+
 The file protocol for each Docker run is:
 
 ```text

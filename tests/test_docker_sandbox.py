@@ -7,9 +7,17 @@ import pytest
 
 from docker_sandbox.cli import main
 from docker_sandbox.container_factory import _build_image_command
-from docker_sandbox.models import DockerConfiguration, DockerProfile
+from docker_sandbox.models import (
+    AgentSocketForward,
+    BrowserDebuggingProfile,
+    DockerConfiguration,
+    DockerProfile,
+    SocketMount,
+)
 from docker_sandbox.profiles import (
+    AMBIENT_SERVICES_IMAGE_NAME,
     BASELINE_IMAGE_NAME,
+    EXECUTION_CONTROL_IMAGE_NAME,
     NETWORK_EGRESS_IMAGE_NAME,
     READONLY_FS_IMAGE_NAME,
     get_docker_profile,
@@ -22,7 +30,9 @@ from docker_sandbox.sandbox_container import (
     _build_docker_run_command,
     _build_gateway_start_commands,
     _build_squid_configuration_text,
+    _delete_denied_executable_directory,
     _delete_readonly_denied_directory,
+    _prepare_denied_executable_stubs,
     _prepare_readonly_denied_directory,
     _resolve_environment_variables,
     _write_landlock_policy,
@@ -278,6 +288,369 @@ def test_network_egress_profile_starts_from_readonly_fs_profile() -> None:
     )
     assert network_profile.landlock_rules == readonly_profile.landlock_rules
     assert network_profile.network_gateway is not None
+
+
+def test_ambient_services_profile_starts_from_network_egress_profile() -> None:
+    """Verify ambient-services begins as a network-egress clone."""
+    network_profile = get_docker_profile("network-egress")
+    ambient_profile = get_docker_profile("ambient-services")
+
+    assert ambient_profile.image_name == AMBIENT_SERVICES_IMAGE_NAME
+    assert ambient_profile.image_name != network_profile.image_name
+    assert network_profile.ipc_mode == "host"
+    assert network_profile.shm_size is None
+    assert network_profile.cgroupns_mode is None
+    assert network_profile.pids_limit is None
+    assert network_profile.cap_drop == ()
+    assert network_profile.security_options == ()
+    assert network_profile.denied_executable_paths == ()
+    assert ambient_profile.ipc_mode == "private"
+    assert ambient_profile.shm_size == "1g"
+    assert ambient_profile.cgroupns_mode == "private"
+    assert ambient_profile.pids_limit == 512
+    assert ambient_profile.cap_drop == ("ALL",)
+    assert ambient_profile.security_options == ("no-new-privileges",)
+    assert (
+        ambient_profile.container_run_options == network_profile.container_run_options
+    )
+    assert ambient_profile.remote_run_root == network_profile.remote_run_root
+    assert (
+        ambient_profile.allowed_directory_template
+        == network_profile.allowed_directory_template
+    )
+    assert (
+        ambient_profile.denied_directory_template
+        == network_profile.denied_directory_template
+    )
+    assert (
+        ambient_profile.readonly_denied_mount_target
+        == network_profile.readonly_denied_mount_target
+    )
+    assert ambient_profile.landlock_rules == network_profile.landlock_rules
+    assert ambient_profile.network_gateway == network_profile.network_gateway
+    assert ambient_profile.socket_mounts == ()
+    assert ambient_profile.ssh_agent_socket is None
+    assert ambient_profile.gpg_agent_socket is None
+    assert ambient_profile.browser_debugging is None
+    assert {policy.name for policy in ambient_profile.environment} == {
+        "SSH_AUTH_SOCK",
+        "GPG_AGENT_INFO",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "GNUPGHOME",
+    }
+    assert set(ambient_profile.denied_executable_paths) == {
+        "/usr/bin/busctl",
+        "/usr/bin/dbus-send",
+        "/usr/bin/gpg",
+        "/usr/bin/gpg-connect-agent",
+        "/usr/bin/gpgconf",
+        "/usr/bin/journalctl",
+        "/usr/bin/loginctl",
+        "/usr/bin/scp",
+        "/usr/bin/sftp",
+        "/usr/bin/ssh",
+        "/usr/bin/ssh-add",
+        "/usr/bin/systemctl",
+        "/usr/sbin/service",
+    }
+
+
+def test_ambient_services_profile_uses_private_ipc_and_bounded_shm(
+    tmp_path: Path,
+) -> None:
+    """Verify ambient-services avoids host IPC while preserving Chromium shm."""
+    configuration = _create_configuration(
+        tmp_path, get_docker_profile("ambient-services")
+    )
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=tmp_path / ".docker_sandbox" / "runs" / "run-test",
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+
+    assert "--ipc=host" not in command
+    assert "--ipc=private" in command
+    assert "--shm-size" in command
+    assert "1g" in command
+    assert "--cgroupns=private" in command
+    assert "--pids-limit" in command
+    assert "512" in command
+    assert "--cap-drop=ALL" in command
+    assert "--security-opt" in command
+    assert "no-new-privileges" in command
+    assert command.index("--ipc=private") < command.index(
+        configuration.profile.image_name
+    )
+    assert "/var/run/docker.sock" not in " ".join(command)
+    assert "SSH_AUTH_SOCK" not in command
+    assert "GNUPGHOME=/tmp/sandbox-gnupg-empty" in command
+    assert "GPG_AGENT_INFO" not in command
+    assert "DBUS_SESSION_BUS_ADDRESS" not in command
+    assert "DISPLAY" not in command
+    assert "WAYLAND_DISPLAY" not in command
+    assert 'mkdir -p "$GNUPGHOME"' in command[-1]
+    joined_command = " ".join(command)
+    assert "target=/usr/bin/gpgconf,readonly" in joined_command
+    assert "target=/usr/bin/gpg-connect-agent,readonly" in joined_command
+    assert "target=/usr/bin/ssh,readonly" in joined_command
+    assert "target=/usr/bin/dbus-send,readonly" in joined_command
+    assert "target=/usr/sbin/service,readonly" in joined_command
+
+
+def test_execution_control_profile_starts_from_ambient_services_profile() -> None:
+    """Verify execution-control begins as an ambient-services clone."""
+    ambient_profile = get_docker_profile("ambient-services")
+    execution_profile = get_docker_profile("execution-control")
+
+    assert execution_profile.image_name == EXECUTION_CONTROL_IMAGE_NAME
+    assert execution_profile.image_name != ambient_profile.image_name
+    assert execution_profile.ipc_mode == ambient_profile.ipc_mode
+    assert execution_profile.shm_size == ambient_profile.shm_size
+    assert execution_profile.cgroupns_mode == ambient_profile.cgroupns_mode
+    assert execution_profile.pids_limit == ambient_profile.pids_limit
+    assert execution_profile.cap_drop == ambient_profile.cap_drop
+    assert execution_profile.cap_add == ambient_profile.cap_add
+    assert execution_profile.security_options == ambient_profile.security_options
+    assert execution_profile.container_run_options == (
+        ambient_profile.container_run_options
+    )
+    assert execution_profile.remote_run_root == ambient_profile.remote_run_root
+    assert (
+        execution_profile.allowed_directory_template
+        == ambient_profile.allowed_directory_template
+    )
+    assert (
+        execution_profile.denied_directory_template
+        == ambient_profile.denied_directory_template
+    )
+    assert (
+        execution_profile.readonly_denied_mount_target
+        == ambient_profile.readonly_denied_mount_target
+    )
+    assert execution_profile.landlock_rules == ambient_profile.landlock_rules
+    assert execution_profile.network_gateway == ambient_profile.network_gateway
+    assert execution_profile.socket_mounts == ambient_profile.socket_mounts
+    assert execution_profile.ssh_agent_socket == ambient_profile.ssh_agent_socket
+    assert execution_profile.gpg_agent_socket == ambient_profile.gpg_agent_socket
+    assert execution_profile.browser_debugging == ambient_profile.browser_debugging
+    assert execution_profile.environment == ambient_profile.environment
+    assert execution_profile.denied_executables == ambient_profile.denied_executables
+    assert set(execution_profile.denied_executable_paths).issuperset(
+        ambient_profile.denied_executable_paths
+    )
+    assert "/usr/bin/apt" in execution_profile.denied_executable_paths
+    assert "/usr/bin/apt-get" in execution_profile.denied_executable_paths
+    assert "/opt/sandbox-tester/.venv/bin/pip" in (
+        execution_profile.denied_executable_paths
+    )
+    assert "/usr/bin/git" in execution_profile.denied_executable_paths
+    assert "/usr/bin/bash" in execution_profile.denied_executable_paths
+    assert "/usr/bin/perl" in execution_profile.denied_executable_paths
+    assert "/usr/bin/mount" in execution_profile.denied_executable_paths
+    assert "/usr/bin/unshare" in execution_profile.denied_executable_paths
+    assert "/usr/bin/systemd-run" in execution_profile.denied_executable_paths
+    assert "/usr/bin/nohup" in execution_profile.denied_executable_paths
+    assert "/usr/bin/setsid" in execution_profile.denied_executable_paths
+
+
+def test_execution_control_profile_denies_common_execution_tools(
+    tmp_path: Path,
+) -> None:
+    """Verify execution-control overlays common execution-control targets."""
+    configuration = _create_configuration(
+        tmp_path, get_docker_profile("execution-control")
+    )
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=tmp_path / ".docker_sandbox" / "runs" / "run-test",
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+
+    joined_command = " ".join(command)
+    assert "target=/usr/bin/apt,readonly" in joined_command
+    assert "target=/usr/bin/apt-get,readonly" in joined_command
+    assert "target=/opt/sandbox-tester/.venv/bin/pip,readonly" in joined_command
+    assert "target=/usr/bin/git,readonly" in joined_command
+    assert "target=/usr/bin/bash,readonly" in joined_command
+    assert "target=/usr/bin/perl,readonly" in joined_command
+    assert "target=/usr/bin/unshare,readonly" in joined_command
+    assert "target=/usr/bin/systemd-run,readonly" in joined_command
+    assert "target=/usr/bin/nohup,readonly" in joined_command
+    assert "target=/usr/bin/setsid,readonly" in joined_command
+    assert "target=/opt/sandbox-tester/.venv/bin/python,readonly" not in joined_command
+    assert "target=/usr/bin/sh,readonly" not in joined_command
+
+
+def test_denied_executable_stubs_are_temporary_run_scaffolding(
+    tmp_path: Path,
+) -> None:
+    """Verify denied executable stubs are generated and then removed."""
+    profile = DockerProfile(
+        name="deny-profile",
+        description="Test denied executable profile.",
+        image_name="sandbox-tester/docker-sandbox:deny-test",
+        denied_executables=("gpgconf",),
+        denied_executable_paths=(),
+    )
+    configuration = _create_configuration(tmp_path, profile)
+    run_directory = tmp_path / ".docker_sandbox" / "runs" / "run-test"
+
+    _prepare_denied_executable_stubs(configuration, run_directory)
+
+    stub_path = run_directory / "denied-executables" / "usr__bin__gpgconf"
+    assert "denied by sandbox profile" in stub_path.read_text(encoding="utf-8")
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=run_directory,
+        container_name="sandbox-tester-run-test",
+        remote_run_directory="/tmp/sandbox-tester/run-test",
+    )
+
+    assert f"type=bind,source={stub_path},target=/usr/bin/gpgconf,readonly" in command
+
+    _delete_denied_executable_directory(configuration, run_directory)
+
+    assert not stub_path.parent.exists()
+
+
+def test_profile_socket_mounts_are_explicit_opt_in(tmp_path: Path) -> None:
+    """Verify host service sockets are mounted only when profiles allow them."""
+    socket_path = tmp_path / "agent.sock"
+    profile = DockerProfile(
+        name="socket-profile",
+        description="Test socket profile.",
+        image_name="sandbox-tester/docker-sandbox:socket-test",
+        socket_mounts=(
+            SocketMount(
+                source_path=socket_path,
+                target_path="/sandbox-sockets/agent.sock",
+                readonly=False,
+            ),
+        ),
+    )
+    configuration = _create_configuration(tmp_path, profile)
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=tmp_path / ".docker_sandbox" / "runs" / "run-test",
+        container_name="sandbox-tester-run-test",
+        remote_run_directory="/tmp/sandbox-tester/run-test",
+    )
+
+    assert "--mount" in command
+    assert (
+        f"type=bind,source={socket_path},target=/sandbox-sockets/agent.sock" in command
+    )
+    assert (
+        f"type=bind,source={socket_path},target=/sandbox-sockets/agent.sock,readonly"
+        not in command
+    )
+
+
+def test_profile_ssh_agent_forward_is_explicit_opt_in(tmp_path: Path) -> None:
+    """Verify SSH agent sockets are mounted and configured only by profile."""
+    socket_path = tmp_path / "ssh-agent.sock"
+    profile = DockerProfile(
+        name="ssh-agent-profile",
+        description="Test SSH agent profile.",
+        image_name="sandbox-tester/docker-sandbox:ssh-agent-test",
+        ssh_agent_socket=AgentSocketForward(
+            source_path=socket_path,
+            target_path="/tmp/ssh-agent.sock",
+        ),
+    )
+    configuration = _create_configuration(tmp_path, profile)
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=tmp_path / ".docker_sandbox" / "runs" / "run-test",
+        container_name="sandbox-tester-run-test",
+        remote_run_directory="/tmp/sandbox-tester/run-test",
+    )
+    config_json = _build_config_json(
+        "/tmp/sandbox-tester/run-test",
+        "/tmp/sandbox-tester/run-test/allowed",
+        "/tmp/sandbox-tester/run-test/denied",
+        "sandbox",
+        ssh_agent_socket="/tmp/ssh-agent.sock",
+    )
+
+    assert f"type=bind,source={socket_path},target=/tmp/ssh-agent.sock" in command
+    assert "SSH_AUTH_SOCK=/tmp/ssh-agent.sock" in command
+    assert '"ssh_agent_socket": "/tmp/ssh-agent.sock"' in config_json
+
+
+def test_profile_gpg_agent_forward_is_explicit_opt_in(tmp_path: Path) -> None:
+    """Verify GPG agent sockets set GNUPGHOME only when profiles allow them."""
+    socket_path = tmp_path / "S.gpg-agent"
+    profile = DockerProfile(
+        name="gpg-agent-profile",
+        description="Test GPG agent profile.",
+        image_name="sandbox-tester/docker-sandbox:gpg-agent-test",
+        gpg_agent_socket=AgentSocketForward(
+            source_path=socket_path,
+            target_path="/tmp/S.gpg-agent",
+        ),
+    )
+    configuration = _create_configuration(tmp_path, profile)
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=tmp_path / ".docker_sandbox" / "runs" / "run-test",
+        container_name="sandbox-tester-run-test",
+        remote_run_directory="/tmp/sandbox-tester/run-test",
+    )
+
+    assert f"type=bind,source={socket_path},target=/tmp/S.gpg-agent" in command
+    assert "GNUPGHOME=/tmp" in command
+
+
+def test_browser_debugging_controls_are_disabled_by_default() -> None:
+    """Verify ambient-services does not expose browser debugging by default."""
+    config_json = _build_config_json(
+        "/sandbox-work/run-test",
+        "/sandbox-work/run-test/allowed",
+        "/sandbox-denied",
+        "sandbox",
+    )
+
+    assert '"browser_debugging_url": null' in config_json
+    assert '"browser_executable": null' in config_json
+    assert '"existing_browser_profile": null' in config_json
+
+
+def test_browser_debugging_controls_are_explicit_opt_in() -> None:
+    """Verify browser debugging context is populated only when configured."""
+    browser_debugging = BrowserDebuggingProfile(
+        debugging_url="http://127.0.0.1:9222/json/version",
+        browser_executable="/usr/bin/chromium",
+        existing_browser_profile="/sandbox-work/browser-profile",
+    )
+
+    config_json = _build_config_json(
+        "/sandbox-work/run-test",
+        "/sandbox-work/run-test/allowed",
+        "/sandbox-denied",
+        "sandbox",
+        browser_debugging=browser_debugging,
+    )
+
+    assert (
+        '"browser_debugging_url": "http://127.0.0.1:9222/json/version"' in config_json
+    )
+    assert '"browser_executable": "/usr/bin/chromium"' in config_json
+    assert '"existing_browser_profile": "/sandbox-work/browser-profile"' in config_json
 
 
 def test_network_egress_profile_uses_internal_network_and_proxy(
