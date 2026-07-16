@@ -552,7 +552,8 @@ a disposable Linux container using a bind-mounted artifact directory.
 
 ## Configuration
 
-Runtime configuration is currently centralized in `src/local_sandbox/cli.py`.
+Runtime configuration starts with the harness-specific command-line modules.
+For local runs, this is currently centralized in `src/local_sandbox/cli.py`.
 This includes:
 
 - verbose versus quiet progress reporting
@@ -564,6 +565,12 @@ This includes:
 The sandbox engine receives this deployment-specific information through
 `CapabilityContext`, so capability tests do not need to discover global paths on
 their own.
+
+Docker hardening configuration is centralized in `src/docker_sandbox/profiles.py`.
+Each profile describes the Docker image tag, build arguments, runtime options,
+mount policy, Landlock path rules, proxy and DNS policy, browser flags,
+resource limits, seccomp profile, environment-variable guards, and executable
+or service controls needed for that hardening stage.
 
 For VirtualBox runs, VM configuration is exposed through
 `src/virtualbox_sandbox/cli.py` flags such as `--vm-name`, `--iso`,
@@ -651,15 +658,20 @@ src/docker_sandbox/
   cli.py                      Docker command-line orchestration
   container_factory.py        Docker image inspection and build operations
   sandbox_container.py        Disposable container execution and fixture setup
+  profiles.py                 Docker hardening profile definitions
+  landlock_runner.py          Linux Landlock path-policy launcher
   run_results.py              Local run artifact persistence
   models.py                   Docker orchestration dataclasses
   dockerfile/Dockerfile       Playwright Python image used for container runs
+  dockerfile/runtime_sitecustomize.py
+                              Python runtime guards injected into hardened images
 
 tests/
   test_smoke.py
   test_redaction.py
   test_runner_serialization.py
   test_docker_sandbox.py
+  test_group_*.py
 
 scripts/
   setup-dev.ps1

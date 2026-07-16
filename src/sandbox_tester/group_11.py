@@ -640,7 +640,7 @@ def _read_shared_memory_in_child_process(
     shared_block: shared_memory.SharedMemory | None = None
 
     try:
-        shared_block = shared_memory.SharedMemory(name=shared_memory_name)
+        shared_block = _attach_shared_memory_without_tracking(shared_memory_name)
         shared_buffer = shared_block.buf
         if shared_buffer is None:
             raise RuntimeError("Shared memory buffer was not available.")
@@ -653,13 +653,25 @@ def _read_shared_memory_in_child_process(
         if shared_block is not None:
             shared_block.close()
 
-            try:
-                from multiprocessing import resource_tracker
 
-                resource_name = getattr(shared_block, "_name", shared_block.name)
-                resource_tracker.unregister(resource_name, "shared_memory")
-            except Exception:
-                pass
+def _attach_shared_memory_without_tracking(
+    shared_memory_name: str,
+) -> shared_memory.SharedMemory:
+    from multiprocessing import resource_tracker
+
+    original_register = resource_tracker.register
+
+    def register_unless_shared_memory(name: str, resource_type: str) -> None:
+        if resource_type == "shared_memory":
+            return
+
+        original_register(name, resource_type)
+
+    try:
+        resource_tracker.register = register_unless_shared_memory
+        return shared_memory.SharedMemory(name=shared_memory_name)
+    finally:
+        resource_tracker.register = original_register
 
 
 def _build_shared_memory_reader_python_code(
@@ -670,17 +682,21 @@ def _build_shared_memory_reader_python_code(
         "from multiprocessing import resource_tracker, shared_memory\n"
         f"name = {shared_memory_name!r}\n"
         f"size = {size}\n"
-        "block = shared_memory.SharedMemory(name=name)\n"
+        "original_register = resource_tracker.register\n"
+        "def register_unless_shared_memory(resource_name, resource_type):\n"
+        "    if resource_type == 'shared_memory':\n"
+        "        return\n"
+        "    original_register(resource_name, resource_type)\n"
+        "try:\n"
+        "    resource_tracker.register = register_unless_shared_memory\n"
+        "    block = shared_memory.SharedMemory(name=name)\n"
+        "finally:\n"
+        "    resource_tracker.register = original_register\n"
         "try:\n"
         "    data = bytes(block.buf[:size])\n"
         "    print(data.decode('utf-8'))\n"
         "finally:\n"
-        "    resource_name = getattr(block, '_name', block.name)\n"
         "    block.close()\n"
-        "    try:\n"
-        "        resource_tracker.unregister(resource_name, 'shared_memory')\n"
-        "    except Exception:\n"
-        "        pass\n"
     )
 
 
