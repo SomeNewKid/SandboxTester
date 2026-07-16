@@ -412,6 +412,17 @@ blocked by the runtime denial-stub policy. The runtime stubs remain in place as
 defense in depth, but the image now also attempts to make those tools absent
 before the container starts.
 
+The `filesystem-visibility` profile starts from the same minimized image and
+runtime hardening as `minimized-image`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:filesystem-visibility` so filesystem and runtime
+metadata exposure can be reduced and measured independently. Its first policy
+keeps `/proc` readable for Python and Chromium compatibility, but explicitly
+relies on Docker's default private PID and UTS namespaces, masks selected
+existing `/proc` and `/sys` surfaces with small tmpfs mounts, removes broad
+Landlock read access to `/sys`, keeps `/dev` available for Python and Chromium
+compatibility, and adds a process file-size ulimit as a coarse output growth
+guard.
+
 The file protocol for each Docker run is:
 
 ```text

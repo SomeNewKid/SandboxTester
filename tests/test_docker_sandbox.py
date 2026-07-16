@@ -13,6 +13,7 @@ from docker_sandbox.models import (
     BrowserSurfaceProfile,
     DockerConfiguration,
     DockerProfile,
+    LandlockPathRule,
     NetworkDnsPolicy,
     SeccompProfile,
     SocketMount,
@@ -23,6 +24,7 @@ from docker_sandbox.profiles import (
     BROWSER_SURFACE_IMAGE_NAME,
     DNS_PROXY_CONTROL_IMAGE_NAME,
     EXECUTION_CONTROL_IMAGE_NAME,
+    FILESYSTEM_VISIBILITY_IMAGE_NAME,
     MINIMIZED_IMAGE_IMAGE_NAME,
     NETWORK_EGRESS_IMAGE_NAME,
     READONLY_FS_IMAGE_NAME,
@@ -932,6 +934,90 @@ def test_minimized_image_profile_uses_minimization_build_argument(
         "SANDBOX_MINIMIZE_IMAGE=true",
         str(tmp_path),
     ]
+
+
+def test_filesystem_visibility_profile_starts_from_minimized_image_profile() -> None:
+    """Verify filesystem-visibility begins as a minimized-image clone."""
+    minimized_profile = get_docker_profile("minimized-image")
+    filesystem_profile = get_docker_profile("filesystem-visibility")
+
+    assert filesystem_profile.image_name == FILESYSTEM_VISIBILITY_IMAGE_NAME
+    assert filesystem_profile.image_name != minimized_profile.image_name
+    assert filesystem_profile.image_build_arguments == (
+        "--build-arg",
+        "SANDBOX_MINIMIZE_IMAGE=true",
+    )
+    assert filesystem_profile.ipc_mode == minimized_profile.ipc_mode
+    assert filesystem_profile.shm_size == minimized_profile.shm_size
+    assert filesystem_profile.cgroupns_mode == minimized_profile.cgroupns_mode
+    assert filesystem_profile.pids_limit == minimized_profile.pids_limit
+    assert filesystem_profile.memory == minimized_profile.memory
+    assert filesystem_profile.memory_swap == minimized_profile.memory_swap
+    assert filesystem_profile.cpus == minimized_profile.cpus
+    assert {ulimit.name for ulimit in filesystem_profile.ulimits} == {
+        "nofile",
+        "nproc",
+        "fsize",
+    }
+    assert filesystem_profile.cap_drop == minimized_profile.cap_drop
+    assert filesystem_profile.cap_add == minimized_profile.cap_add
+    assert filesystem_profile.security_options == minimized_profile.security_options
+    assert filesystem_profile.seccomp_profile == minimized_profile.seccomp_profile
+    assert filesystem_profile.remote_run_root == minimized_profile.remote_run_root
+    assert (
+        filesystem_profile.allowed_directory_template
+        == minimized_profile.allowed_directory_template
+    )
+    assert (
+        filesystem_profile.denied_directory_template
+        == minimized_profile.denied_directory_template
+    )
+    assert (
+        filesystem_profile.readonly_denied_mount_target
+        == minimized_profile.readonly_denied_mount_target
+    )
+    assert filesystem_profile.network_gateway == minimized_profile.network_gateway
+    assert filesystem_profile.network_dns_policy == minimized_profile.network_dns_policy
+    assert filesystem_profile.socket_mounts == minimized_profile.socket_mounts
+    assert filesystem_profile.ssh_agent_socket == minimized_profile.ssh_agent_socket
+    assert filesystem_profile.gpg_agent_socket == minimized_profile.gpg_agent_socket
+    assert filesystem_profile.browser_debugging == minimized_profile.browser_debugging
+    assert filesystem_profile.browser_surface == minimized_profile.browser_surface
+    assert filesystem_profile.environment == minimized_profile.environment
+    assert filesystem_profile.denied_executables == minimized_profile.denied_executables
+    assert (
+        filesystem_profile.denied_executable_paths
+        == minimized_profile.denied_executable_paths
+    )
+
+
+def test_filesystem_visibility_profile_reduces_runtime_surface(
+    tmp_path: Path,
+) -> None:
+    """Verify filesystem-visibility narrows runtime filesystem exposure."""
+    configuration = _create_configuration(
+        tmp_path, get_docker_profile("filesystem-visibility")
+    )
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=tmp_path / ".docker_sandbox" / "runs" / "run-test",
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+    profile = configuration.profile
+
+    assert FILESYSTEM_VISIBILITY_IMAGE_NAME in command
+    assert "--pid=private" not in command
+    assert "--uts=private" not in command
+    assert "/tmp:rw,nosuid,nodev,noexec,size=1g" in command
+    assert "/proc/acpi:rw,nosuid,nodev,noexec,size=1k" in command
+    assert "/sys/firmware:rw,nosuid,nodev,noexec,size=1k" in command
+    assert "fsize=104857600:104857600" in command
+    assert LandlockPathRule("/sys", "r") not in profile.landlock_rules
+    assert LandlockPathRule("/dev", "rw") in profile.landlock_rules
 
 
 def test_denied_executable_stubs_are_temporary_run_scaffolding(
