@@ -2378,6 +2378,7 @@ class G13_T13:
     def __init__(self, capability_context: CapabilityContext) -> None:
         self._allowed_domain = capability_context.allowed_domain
         self._output_directory = capability_context.output_directory
+        self._chromium_arguments = capability_context.browser_chromium_arguments
 
     async def run_shell(self) -> InvocationResult:
         if self._is_allowed_domain_unconfigured():
@@ -2545,7 +2546,10 @@ class G13_T13:
 
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True)
+                browser = playwright.chromium.launch(
+                    args=list(self._chromium_arguments),
+                    headless=True,
+                )
                 try:
                     page = browser.new_page(viewport={"width": 1280, "height": 720})
                     page.goto(self._get_allowed_url(), wait_until="load", timeout=30000)
@@ -2563,17 +2567,20 @@ class G13_T13:
         script = {
             "url": self._get_allowed_url(),
             "screenshot_path": str(screenshot_path),
+            "chromium_arguments": list(self._chromium_arguments),
         }
         return (
             "from pathlib import Path\n"
             "from playwright.sync_api import sync_playwright\n"
             f"url = {script['url']!r}\n"
             f"screenshot_path = Path({script['screenshot_path']!r})\n"
+            f"chromium_arguments = {script['chromium_arguments']!r}\n"
             "temporary_path = screenshot_path.with_suffix("
             "f'{screenshot_path.suffix}.tmp')\n"
             "try:\n"
             "    with sync_playwright() as playwright:\n"
-            "        browser = playwright.chromium.launch(headless=True)\n"
+            "        browser = playwright.chromium.launch("
+            "args=chromium_arguments, headless=True)\n"
             "        try:\n"
             "            page = browser.new_page("
             "viewport={'width': 1280, 'height': 720})\n"

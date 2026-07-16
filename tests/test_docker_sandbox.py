@@ -10,16 +10,23 @@ from docker_sandbox.container_factory import _build_image_command
 from docker_sandbox.models import (
     AgentSocketForward,
     BrowserDebuggingProfile,
+    BrowserSurfaceProfile,
     DockerConfiguration,
     DockerProfile,
+    NetworkDnsPolicy,
+    SeccompProfile,
     SocketMount,
 )
 from docker_sandbox.profiles import (
     AMBIENT_SERVICES_IMAGE_NAME,
     BASELINE_IMAGE_NAME,
+    BROWSER_SURFACE_IMAGE_NAME,
+    DNS_PROXY_CONTROL_IMAGE_NAME,
     EXECUTION_CONTROL_IMAGE_NAME,
     NETWORK_EGRESS_IMAGE_NAME,
     READONLY_FS_IMAGE_NAME,
+    RESOURCE_LIMITS_IMAGE_NAME,
+    SYSCALL_CONTROL_IMAGE_NAME,
     get_docker_profile,
 )
 from docker_sandbox.sandbox_container import (
@@ -36,6 +43,7 @@ from docker_sandbox.sandbox_container import (
     _prepare_readonly_denied_directory,
     _resolve_environment_variables,
     _write_landlock_policy,
+    _write_seccomp_profile,
 )
 
 
@@ -301,6 +309,10 @@ def test_ambient_services_profile_starts_from_network_egress_profile() -> None:
     assert network_profile.shm_size is None
     assert network_profile.cgroupns_mode is None
     assert network_profile.pids_limit is None
+    assert network_profile.memory is None
+    assert network_profile.memory_swap is None
+    assert network_profile.cpus is None
+    assert network_profile.ulimits == ()
     assert network_profile.cap_drop == ()
     assert network_profile.security_options == ()
     assert network_profile.denied_executable_paths == ()
@@ -414,6 +426,10 @@ def test_execution_control_profile_starts_from_ambient_services_profile() -> Non
     assert execution_profile.shm_size == ambient_profile.shm_size
     assert execution_profile.cgroupns_mode == ambient_profile.cgroupns_mode
     assert execution_profile.pids_limit == ambient_profile.pids_limit
+    assert execution_profile.memory == ambient_profile.memory
+    assert execution_profile.memory_swap == ambient_profile.memory_swap
+    assert execution_profile.cpus == ambient_profile.cpus
+    assert execution_profile.ulimits == ambient_profile.ulimits
     assert execution_profile.cap_drop == ambient_profile.cap_drop
     assert execution_profile.cap_add == ambient_profile.cap_add
     assert execution_profile.security_options == ambient_profile.security_options
@@ -489,6 +505,353 @@ def test_execution_control_profile_denies_common_execution_tools(
     assert "target=/usr/bin/setsid,readonly" in joined_command
     assert "target=/opt/sandbox-tester/.venv/bin/python,readonly" not in joined_command
     assert "target=/usr/bin/sh,readonly" not in joined_command
+
+
+def test_syscall_control_profile_starts_from_execution_control_profile() -> None:
+    """Verify syscall-control begins as an execution-control clone."""
+    execution_profile = get_docker_profile("execution-control")
+    syscall_profile = get_docker_profile("syscall-control")
+
+    assert syscall_profile.image_name == SYSCALL_CONTROL_IMAGE_NAME
+    assert syscall_profile.image_name != execution_profile.image_name
+    assert syscall_profile.ipc_mode == execution_profile.ipc_mode
+    assert syscall_profile.shm_size == execution_profile.shm_size
+    assert syscall_profile.cgroupns_mode == execution_profile.cgroupns_mode
+    assert syscall_profile.pids_limit == execution_profile.pids_limit
+    assert syscall_profile.memory == execution_profile.memory
+    assert syscall_profile.memory_swap == execution_profile.memory_swap
+    assert syscall_profile.cpus == execution_profile.cpus
+    assert syscall_profile.ulimits == execution_profile.ulimits
+    assert syscall_profile.cap_drop == execution_profile.cap_drop
+    assert syscall_profile.cap_add == execution_profile.cap_add
+    assert syscall_profile.security_options == execution_profile.security_options
+    assert execution_profile.seccomp_profile is None
+    assert syscall_profile.seccomp_profile == SeccompProfile()
+    assert syscall_profile.container_run_options == (
+        execution_profile.container_run_options
+    )
+    assert syscall_profile.remote_run_root == execution_profile.remote_run_root
+    assert (
+        syscall_profile.allowed_directory_template
+        == execution_profile.allowed_directory_template
+    )
+    assert (
+        syscall_profile.denied_directory_template
+        == execution_profile.denied_directory_template
+    )
+    assert (
+        syscall_profile.readonly_denied_mount_target
+        == execution_profile.readonly_denied_mount_target
+    )
+    assert syscall_profile.landlock_rules == execution_profile.landlock_rules
+    assert syscall_profile.network_gateway == execution_profile.network_gateway
+    assert syscall_profile.socket_mounts == execution_profile.socket_mounts
+    assert syscall_profile.ssh_agent_socket == execution_profile.ssh_agent_socket
+    assert syscall_profile.gpg_agent_socket == execution_profile.gpg_agent_socket
+    assert syscall_profile.browser_debugging == execution_profile.browser_debugging
+    assert syscall_profile.environment == execution_profile.environment
+    assert syscall_profile.denied_executables == execution_profile.denied_executables
+    assert (
+        syscall_profile.denied_executable_paths
+        == execution_profile.denied_executable_paths
+    )
+
+
+def test_syscall_control_profile_uses_generated_seccomp_profile(
+    tmp_path: Path,
+) -> None:
+    """Verify syscall-control adds its generated seccomp profile to Docker."""
+    configuration = _create_configuration(
+        tmp_path, get_docker_profile("syscall-control")
+    )
+    run_directory = tmp_path / ".docker_sandbox" / "runs" / "run-test"
+    run_directory.mkdir(parents=True)
+
+    _write_seccomp_profile(configuration, run_directory)
+
+    seccomp_path = run_directory / "seccomp-profile.json"
+    seccomp_data = json.loads(seccomp_path.read_text(encoding="utf-8"))
+    denied_syscalls = seccomp_data["syscalls"][0]["names"]
+
+    assert seccomp_data["defaultAction"] == "SCMP_ACT_ALLOW"
+    assert seccomp_data["syscalls"][0]["action"] == "SCMP_ACT_ERRNO"
+    assert "mount" in denied_syscalls
+    assert "umount2" in denied_syscalls
+    assert "unshare" in denied_syscalls
+    assert "setns" in denied_syscalls
+    assert "ptrace" in denied_syscalls
+    assert "process_vm_readv" in denied_syscalls
+    assert "keyctl" in denied_syscalls
+    assert "add_key" in denied_syscalls
+    assert "init_module" in denied_syscalls
+    assert "bpf" in denied_syscalls
+    assert "perf_event_open" in denied_syscalls
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=run_directory,
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+
+    assert "--security-opt" in command
+    assert f"seccomp={seccomp_path}" in command
+
+
+def test_resource_limits_profile_starts_from_syscall_control_profile() -> None:
+    """Verify resource-limits begins as a syscall-control clone."""
+    syscall_profile = get_docker_profile("syscall-control")
+    resource_profile = get_docker_profile("resource-limits")
+
+    assert resource_profile.image_name == RESOURCE_LIMITS_IMAGE_NAME
+    assert resource_profile.image_name != syscall_profile.image_name
+    assert resource_profile.ipc_mode == syscall_profile.ipc_mode
+    assert resource_profile.shm_size == syscall_profile.shm_size
+    assert resource_profile.cgroupns_mode == syscall_profile.cgroupns_mode
+    assert resource_profile.pids_limit == syscall_profile.pids_limit
+    assert syscall_profile.memory is None
+    assert syscall_profile.memory_swap is None
+    assert syscall_profile.cpus is None
+    assert syscall_profile.ulimits == ()
+    assert resource_profile.memory == "2g"
+    assert resource_profile.memory_swap == "2g"
+    assert resource_profile.cpus == "2"
+    assert {ulimit.name for ulimit in resource_profile.ulimits} == {
+        "nofile",
+        "nproc",
+    }
+    assert resource_profile.cap_drop == syscall_profile.cap_drop
+    assert resource_profile.cap_add == syscall_profile.cap_add
+    assert resource_profile.security_options == syscall_profile.security_options
+    assert resource_profile.seccomp_profile == syscall_profile.seccomp_profile
+    assert resource_profile.container_run_options == (
+        syscall_profile.container_run_options
+    )
+    assert resource_profile.remote_run_root == syscall_profile.remote_run_root
+    assert (
+        resource_profile.allowed_directory_template
+        == syscall_profile.allowed_directory_template
+    )
+    assert (
+        resource_profile.denied_directory_template
+        == syscall_profile.denied_directory_template
+    )
+    assert (
+        resource_profile.readonly_denied_mount_target
+        == syscall_profile.readonly_denied_mount_target
+    )
+    assert resource_profile.landlock_rules == syscall_profile.landlock_rules
+    assert resource_profile.network_gateway == syscall_profile.network_gateway
+    assert resource_profile.socket_mounts == syscall_profile.socket_mounts
+    assert resource_profile.ssh_agent_socket == syscall_profile.ssh_agent_socket
+    assert resource_profile.gpg_agent_socket == syscall_profile.gpg_agent_socket
+    assert resource_profile.browser_debugging == syscall_profile.browser_debugging
+    assert resource_profile.environment == syscall_profile.environment
+    assert resource_profile.denied_executables == syscall_profile.denied_executables
+    assert (
+        resource_profile.denied_executable_paths
+        == syscall_profile.denied_executable_paths
+    )
+
+
+def test_resource_limits_profile_applies_docker_resource_limits(
+    tmp_path: Path,
+) -> None:
+    """Verify resource-limits adds CPU, memory, and ulimit guards."""
+    configuration = _create_configuration(
+        tmp_path, get_docker_profile("resource-limits")
+    )
+    run_directory = tmp_path / ".docker_sandbox" / "runs" / "run-test"
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=run_directory,
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+
+    assert "--memory" in command
+    assert "2g" in command
+    assert "--memory-swap" in command
+    assert "--cpus" in command
+    assert "2" in command
+    assert "--ulimit" in command
+    assert "nofile=4096:4096" in command
+    assert "nproc=512:512" in command
+
+
+def test_browser_surface_profile_starts_from_resource_limits_profile() -> None:
+    """Verify browser-surface begins as a resource-limits clone."""
+    resource_profile = get_docker_profile("resource-limits")
+    browser_profile = get_docker_profile("browser-surface")
+
+    assert browser_profile.image_name == BROWSER_SURFACE_IMAGE_NAME
+    assert browser_profile.image_name != resource_profile.image_name
+    assert browser_profile.ipc_mode == resource_profile.ipc_mode
+    assert browser_profile.shm_size == resource_profile.shm_size
+    assert browser_profile.cgroupns_mode == resource_profile.cgroupns_mode
+    assert browser_profile.pids_limit == resource_profile.pids_limit
+    assert browser_profile.memory == resource_profile.memory
+    assert browser_profile.memory_swap == resource_profile.memory_swap
+    assert browser_profile.cpus == resource_profile.cpus
+    assert browser_profile.ulimits == resource_profile.ulimits
+    assert browser_profile.cap_drop == resource_profile.cap_drop
+    assert browser_profile.cap_add == resource_profile.cap_add
+    assert browser_profile.security_options == resource_profile.security_options
+    assert browser_profile.seccomp_profile == resource_profile.seccomp_profile
+    assert browser_profile.container_run_options == (
+        resource_profile.container_run_options
+    )
+    assert browser_profile.remote_run_root == resource_profile.remote_run_root
+    assert (
+        browser_profile.allowed_directory_template
+        == resource_profile.allowed_directory_template
+    )
+    assert (
+        browser_profile.denied_directory_template
+        == resource_profile.denied_directory_template
+    )
+    assert (
+        browser_profile.readonly_denied_mount_target
+        == resource_profile.readonly_denied_mount_target
+    )
+    assert browser_profile.landlock_rules == resource_profile.landlock_rules
+    assert browser_profile.network_gateway == resource_profile.network_gateway
+    assert browser_profile.network_dns_policy == resource_profile.network_dns_policy
+    assert browser_profile.socket_mounts == resource_profile.socket_mounts
+    assert browser_profile.ssh_agent_socket == resource_profile.ssh_agent_socket
+    assert browser_profile.gpg_agent_socket == resource_profile.gpg_agent_socket
+    assert browser_profile.browser_debugging == resource_profile.browser_debugging
+    assert resource_profile.browser_surface is None
+    assert browser_profile.browser_surface == BrowserSurfaceProfile()
+    assert browser_profile.environment == resource_profile.environment
+    assert browser_profile.denied_executables == resource_profile.denied_executables
+    assert (
+        browser_profile.denied_executable_paths
+        == resource_profile.denied_executable_paths
+    )
+
+
+def test_browser_surface_profile_hardens_browser_context() -> None:
+    """Verify browser-surface config denies media and adds Chromium flags."""
+    profile = get_docker_profile("browser-surface")
+    config_json = _build_config_json(
+        "/sandbox-work/run-test",
+        "/sandbox-work/run-test/allowed",
+        "/sandbox-denied",
+        "sandbox",
+        browser_surface=profile.browser_surface,
+    )
+
+    assert '"allow_camera_capture": false' in config_json
+    assert '"allow_microphone_capture": false' in config_json
+    assert '"--disable-sync"' in config_json
+    assert '"--password-store=basic"' in config_json
+    assert '"--use-mock-keychain"' in config_json
+    assert '"--disable-gpu"' in config_json
+
+
+def test_dns_proxy_control_profile_starts_from_browser_surface_profile() -> None:
+    """Verify dns-proxy-control begins as a browser-surface clone."""
+    browser_profile = get_docker_profile("browser-surface")
+    dns_profile = get_docker_profile("dns-proxy-control")
+
+    assert dns_profile.image_name == DNS_PROXY_CONTROL_IMAGE_NAME
+    assert dns_profile.image_name != browser_profile.image_name
+    assert dns_profile.ipc_mode == browser_profile.ipc_mode
+    assert dns_profile.shm_size == browser_profile.shm_size
+    assert dns_profile.cgroupns_mode == browser_profile.cgroupns_mode
+    assert dns_profile.pids_limit == browser_profile.pids_limit
+    assert dns_profile.memory == browser_profile.memory
+    assert dns_profile.memory_swap == browser_profile.memory_swap
+    assert dns_profile.cpus == browser_profile.cpus
+    assert dns_profile.ulimits == browser_profile.ulimits
+    assert dns_profile.cap_drop == browser_profile.cap_drop
+    assert dns_profile.cap_add == browser_profile.cap_add
+    assert dns_profile.security_options == browser_profile.security_options
+    assert dns_profile.seccomp_profile == browser_profile.seccomp_profile
+    assert dns_profile.container_run_options == browser_profile.container_run_options
+    assert dns_profile.remote_run_root == browser_profile.remote_run_root
+    assert (
+        dns_profile.allowed_directory_template
+        == browser_profile.allowed_directory_template
+    )
+    assert (
+        dns_profile.denied_directory_template
+        == browser_profile.denied_directory_template
+    )
+    assert (
+        dns_profile.readonly_denied_mount_target
+        == browser_profile.readonly_denied_mount_target
+    )
+    assert dns_profile.landlock_rules == browser_profile.landlock_rules
+    assert dns_profile.network_gateway == browser_profile.network_gateway
+    assert browser_profile.network_dns_policy is None
+    assert dns_profile.network_dns_policy == NetworkDnsPolicy()
+    assert dns_profile.socket_mounts == browser_profile.socket_mounts
+    assert dns_profile.ssh_agent_socket == browser_profile.ssh_agent_socket
+    assert dns_profile.gpg_agent_socket == browser_profile.gpg_agent_socket
+    assert dns_profile.browser_debugging == browser_profile.browser_debugging
+    assert dns_profile.browser_surface == browser_profile.browser_surface
+    assert dns_profile.environment == browser_profile.environment
+    assert dns_profile.denied_executables == browser_profile.denied_executables
+    assert (
+        dns_profile.denied_executable_paths == browser_profile.denied_executable_paths
+    )
+
+
+def test_dns_proxy_control_profile_adds_dns_policy_options(
+    tmp_path: Path,
+) -> None:
+    """Verify dns-proxy-control constrains DNS and Docker host aliases."""
+    configuration = _create_configuration(
+        tmp_path, get_docker_profile("dns-proxy-control")
+    )
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=tmp_path / ".docker_sandbox" / "runs" / "run-test",
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+
+    assert "--dns" in command
+    assert "172.20.0.2" in command
+    assert "--dns-option" in command
+    assert "attempts:1" in command
+    assert "timeout:1" in command
+    assert "--add-host" in command
+    assert "host.docker.internal:0.0.0.0" in command
+    assert "gateway.docker.internal:0.0.0.0" in command
+    assert "kubernetes.docker.internal:0.0.0.0" in command
+    assert command.index("--network") < command.index("--dns")
+    assert command.index("--dns") < command.index(configuration.profile.image_name)
+
+
+def test_dns_proxy_control_profile_fails_closed_without_gateway_ip(
+    tmp_path: Path,
+) -> None:
+    """Verify dns-proxy-control uses loopback DNS if gateway inspect fails."""
+    configuration = _create_configuration(
+        tmp_path, get_docker_profile("dns-proxy-control")
+    )
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=tmp_path / ".docker_sandbox" / "runs" / "run-test",
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+    )
+
+    assert "--dns" in command
+    assert "127.0.0.1" in command
 
 
 def test_denied_executable_stubs_are_temporary_run_scaffolding(

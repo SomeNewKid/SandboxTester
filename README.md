@@ -356,6 +356,50 @@ source-control tools, admin and namespace tools, scheduling helpers, extra
 interpreters, and background-process helpers while leaving Python, `/bin/sh`,
 Playwright, and Chromium available for the tester itself.
 
+The `syscall-control` profile starts from the same Docker runtime options,
+Landlock policy, Squid proxy sidecar, ambient-service controls, and executable
+denial list as `execution-control`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:syscall-control` so seccomp and other syscall
+controls can be added and measured independently. Its first seccomp policy
+keeps the normal Python, Playwright, Chromium, and OpenAI API workload
+available while denying syscall families for mounts, namespace attachment,
+keyrings, ptrace and process memory inspection, kernel module loading, BPF,
+performance events, and other low-level privileged operations.
+
+The `resource-limits` profile starts from the same Docker runtime options,
+Landlock policy, Squid proxy sidecar, executable denial list, and seccomp
+policy as `syscall-control`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:resource-limits` so explicit CPU, memory,
+process, and file-descriptor limits can be added and measured independently.
+Its first resource policy limits the container to 2 CPUs, 2 GB of memory with
+no extra swap allowance, 512 processes, and bounded `nofile` and `nproc`
+ulimits while leaving enough room for Python, Playwright, Chromium, and the
+OpenAI API probe.
+
+The `browser-surface` profile starts from the same Docker runtime options,
+Landlock policy, Squid proxy sidecar, executable denial list, seccomp policy,
+and resource limits as `resource-limits`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:browser-surface` so browser-adjacent hardening
+can be added and measured independently. Its first browser-surface policy
+passes explicit hardened Chromium flags to the Playwright screenshot probes,
+including flags that disable sync, background networking, extensions, component
+updates, password-store integration, external media routing, audio output, and
+GPU acceleration. It also keeps browser debugging surfaces unadvertised,
+continues to use fresh temporary browser profiles, and disables configured
+camera and microphone capture by default while keeping the Playwright screenshot
+probes working.
+
+The `dns-proxy-control` profile starts from the same Docker runtime options,
+Landlock policy, Squid proxy sidecar, executable denial list, seccomp policy,
+resource limits, and browser-surface controls as `browser-surface`, but uses the
+separate image tag `sandbox-tester/docker-sandbox:dns-proxy-control` so DNS and
+proxy-bypass hardening can be added and measured independently. Its first DNS
+policy points the sandbox container at the gateway address as its DNS server,
+which keeps ordinary HTTP and HTTPS traffic on the proxy path while making
+direct DNS lookups fail closed because the gateway is not a general DNS
+resolver. It also uses short DNS timeouts and maps Docker host shortcut names
+such as `host.docker.internal` to `0.0.0.0` inside the sandbox container.
+
 The file protocol for each Docker run is:
 
 ```text

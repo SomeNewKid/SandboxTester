@@ -25,6 +25,24 @@ class NetworkGatewayProfile:
 
 
 @dataclass(frozen=True)
+class NetworkDnsPolicy:
+    """DNS and Docker host-name hardening for a Docker profile."""
+
+    use_gateway_as_dns: bool = True
+    fallback_dns_address: str = "127.0.0.1"
+    dns_options: tuple[str, ...] = (
+        "attempts:1",
+        "timeout:1",
+    )
+    blocked_hostnames: tuple[str, ...] = (
+        "host.docker.internal",
+        "gateway.docker.internal",
+        "kubernetes.docker.internal",
+    )
+    blocked_hostname_address: str = "0.0.0.0"
+
+
+@dataclass(frozen=True)
 class SocketMount:
     """Explicit host socket mount allowed for a Docker profile."""
 
@@ -51,11 +69,95 @@ class BrowserDebuggingProfile:
 
 
 @dataclass(frozen=True)
+class BrowserSurfaceProfile:
+    """Browser hardening settings advertised to Sandbox Tester."""
+
+    chromium_arguments: tuple[str, ...] = (
+        "--disable-background-networking",
+        "--disable-breakpad",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-component-update",
+        "--disable-default-apps",
+        "--disable-dev-shm-usage",
+        "--disable-extensions",
+        "--disable-features=AutofillServerCommunication,MediaRouter,OptimizationHints",
+        "--disable-gpu",
+        "--disable-hang-monitor",
+        "--disable-popup-blocking",
+        "--disable-prompt-on-repost",
+        "--disable-sync",
+        "--disable-translate",
+        "--metrics-recording-only",
+        "--mute-audio",
+        "--no-default-browser-check",
+        "--no-first-run",
+        "--password-store=basic",
+        "--use-mock-keychain",
+    )
+    allow_camera_capture: bool = False
+    allow_microphone_capture: bool = False
+
+
+@dataclass(frozen=True)
 class EnvironmentVariablePolicy:
     """Environment variable override for a Docker profile."""
 
     name: str
     value: str | None
+
+
+@dataclass(frozen=True)
+class SeccompProfile:
+    """Docker seccomp deny profile for risky syscall families."""
+
+    denied_syscalls: tuple[str, ...] = (
+        "acct",
+        "add_key",
+        "bpf",
+        "delete_module",
+        "finit_module",
+        "get_mempolicy",
+        "init_module",
+        "ioperm",
+        "iopl",
+        "keyctl",
+        "kcmp",
+        "lookup_dcookie",
+        "mbind",
+        "mount",
+        "move_mount",
+        "name_to_handle_at",
+        "nfsservctl",
+        "open_by_handle_at",
+        "open_tree",
+        "perf_event_open",
+        "personality",
+        "pidfd_getfd",
+        "pivot_root",
+        "process_vm_readv",
+        "process_vm_writev",
+        "ptrace",
+        "quotactl",
+        "reboot",
+        "request_key",
+        "set_mempolicy",
+        "setns",
+        "syslog",
+        "umount",
+        "umount2",
+        "unshare",
+    )
+    action: str = "SCMP_ACT_ERRNO"
+    default_action: str = "SCMP_ACT_ALLOW"
+
+
+@dataclass(frozen=True)
+class DockerUlimit:
+    """Docker ulimit setting for a hardening profile."""
+
+    name: str
+    soft: int
+    hard: int
 
 
 @dataclass(frozen=True)
@@ -70,9 +172,17 @@ class DockerProfile:
     shm_size: str | None = None
     cgroupns_mode: str | None = "private"
     pids_limit: int | None = 512
+    memory: str | None = "2g"
+    memory_swap: str | None = "2g"
+    cpus: str | None = "2"
+    ulimits: tuple[DockerUlimit, ...] = (
+        DockerUlimit("nofile", 4096, 4096),
+        DockerUlimit("nproc", 512, 512),
+    )
     cap_drop: tuple[str, ...] = ("ALL",)
     cap_add: tuple[str, ...] = ()
     security_options: tuple[str, ...] = ("no-new-privileges",)
+    seccomp_profile: SeccompProfile | None = SeccompProfile()
     container_run_options: tuple[str, ...] = ()
     remote_run_root: str = "/tmp/sandbox-tester"
     allowed_directory_template: str = "{remote_run_directory}/allowed"
@@ -80,10 +190,12 @@ class DockerProfile:
     readonly_denied_mount_target: str | None = None
     landlock_rules: tuple[LandlockPathRule, ...] = ()
     network_gateway: NetworkGatewayProfile | None = None
+    network_dns_policy: NetworkDnsPolicy | None = NetworkDnsPolicy()
     socket_mounts: tuple[SocketMount, ...] = ()
     ssh_agent_socket: AgentSocketForward | None = None
     gpg_agent_socket: AgentSocketForward | None = None
     browser_debugging: BrowserDebuggingProfile | None = None
+    browser_surface: BrowserSurfaceProfile | None = BrowserSurfaceProfile()
     environment: tuple[EnvironmentVariablePolicy, ...] = ()
     denied_executables: tuple[str, ...] = ()
     denied_executable_paths: tuple[str, ...] = (

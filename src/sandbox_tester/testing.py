@@ -61,6 +61,7 @@ class CapabilityContext:
     browser_debugging_url: str | None = None
     browser_executable: Path | None = None
     existing_browser_profile: Path | None = None
+    browser_chromium_arguments: tuple[str, ...] = ()
     allowed_git_repository: Path | None = None
     denied_git_repository: Path | None = None
     git_remote_url: str | None = None
@@ -98,6 +99,7 @@ class CapabilityContext:
         browser_debugging_url: str | None = None,
         browser_executable: Path | None = None,
         existing_browser_profile: Path | None = None,
+        browser_chromium_arguments: tuple[str, ...] = (),
         allowed_git_repository: Path | None = None,
         denied_git_repository: Path | None = None,
         git_remote_url: str | None = None,
@@ -149,6 +151,7 @@ class CapabilityContext:
             browser_debugging_url=browser_debugging_url,
             browser_executable=browser_executable,
             existing_browser_profile=existing_browser_profile,
+            browser_chromium_arguments=browser_chromium_arguments,
             allowed_git_repository=(
                 allowed_git_repository.resolve()
                 if allowed_git_repository is not None
@@ -204,6 +207,7 @@ class CapabilityContext:
             "existing_browser_profile": _optional_path_to_json(
                 self.existing_browser_profile
             ),
+            "browser_chromium_arguments": list(self.browser_chromium_arguments),
             "allowed_git_repository": _optional_path_to_json(
                 self.allowed_git_repository
             ),
@@ -251,6 +255,9 @@ class CapabilityContext:
             browser_executable=_optional_path_from_json(data.get("browser_executable")),
             existing_browser_profile=_optional_path_from_json(
                 data.get("existing_browser_profile")
+            ),
+            browser_chromium_arguments=tuple(
+                str(argument) for argument in data.get("browser_chromium_arguments", ())
             ),
             allowed_git_repository=_optional_path_from_json(
                 data.get("allowed_git_repository")

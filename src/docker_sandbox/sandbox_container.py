@@ -16,9 +16,12 @@ from urllib.parse import urlparse
 from .models import (
     AgentSocketForward,
     BrowserDebuggingProfile,
+    BrowserSurfaceProfile,
     DockerConfiguration,
     DockerRunResult,
     EnvironmentVariablePolicy,
+    NetworkDnsPolicy,
+    SeccompProfile,
     SocketMount,
 )
 
@@ -31,6 +34,7 @@ _GATEWAY_CONTAINER_NAME_PREFIX = "sandbox-tester-gateway"
 _NETWORK_NAME_PREFIX = "sandbox-tester-net"
 _READONLY_DENIED_SOURCE_DIRECTORY = "readonly-denied"
 _SQUID_CONFIGURATION_FILE_NAME = "squid.conf"
+_SECCOMP_PROFILE_FILE_NAME = "seccomp-profile.json"
 _GATEWAY_START_RESULTS_FILE_NAME = "gateway-start-results.json"
 _GATEWAY_LOG_FILE_NAME = "gateway-logs.json"
 _DENIED_EXECUTABLE_SOURCE_DIRECTORY = "denied-executables"
@@ -64,6 +68,7 @@ def run_sandbox_container(
     _prepare_readonly_denied_directory(configuration, run_directory)
     _prepare_denied_executable_stubs(configuration, run_directory)
     _write_landlock_policy(configuration, run_directory)
+    _write_seccomp_profile(configuration, run_directory)
     config_data = _build_config_data(
         remote_run_directory,
         allowed_directory,
@@ -71,6 +76,7 @@ def run_sandbox_container(
         configuration.guest_user,
         _get_container_ssh_agent_socket(configuration),
         configuration.profile.browser_debugging,
+        configuration.profile.browser_surface,
     )
     _write_squid_configuration(configuration, run_directory, config_data)
     config_path = run_directory / "config.json"
@@ -281,6 +287,32 @@ def _write_landlock_policy(
     policy_text = json.dumps(policy, indent=2)
     policy_path = run_directory / "landlock-policy.json"
     policy_path.write_text(f"{policy_text}\n", encoding="utf-8")
+
+
+def _write_seccomp_profile(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+) -> None:
+    seccomp_profile = configuration.profile.seccomp_profile
+    if seccomp_profile is None:
+        return
+
+    profile_data = _build_seccomp_profile_data(seccomp_profile)
+    profile_text = json.dumps(profile_data, indent=2)
+    profile_path = run_directory / _SECCOMP_PROFILE_FILE_NAME
+    profile_path.write_text(f"{profile_text}\n", encoding="utf-8")
+
+
+def _build_seccomp_profile_data(seccomp_profile: SeccompProfile) -> dict[str, object]:
+    return {
+        "defaultAction": seccomp_profile.default_action,
+        "syscalls": [
+            {
+                "names": list(seccomp_profile.denied_syscalls),
+                "action": seccomp_profile.action,
+            },
+        ],
+    }
 
 
 def _write_squid_configuration(
@@ -673,6 +705,7 @@ def _build_config_data(
     guest_user: str,
     ssh_agent_socket: str | None = None,
     browser_debugging: BrowserDebuggingProfile | None = None,
+    browser_surface: BrowserSurfaceProfile | None = None,
 ) -> dict[str, object]:
     return {
         "working_directory": remote_run_directory,
@@ -705,11 +738,12 @@ def _build_config_data(
         "browser_debugging_url": _get_browser_debugging_url(browser_debugging),
         "browser_executable": _get_browser_executable(browser_debugging),
         "existing_browser_profile": _get_existing_browser_profile(browser_debugging),
+        "browser_chromium_arguments": _get_browser_chromium_arguments(browser_surface),
         "allowed_git_repository": None,
         "denied_git_repository": None,
         "git_remote_url": _GIT_REMOTE_URL,
-        "allow_camera_capture": True,
-        "allow_microphone_capture": True,
+        "allow_camera_capture": _get_allow_camera_capture(browser_surface),
+        "allow_microphone_capture": _get_allow_microphone_capture(browser_surface),
         "output_directory": _REMOTE_OUTPUT_DIRECTORY,
     }
 
@@ -721,6 +755,7 @@ def _build_config_json(
     guest_user: str,
     ssh_agent_socket: str | None = None,
     browser_debugging: BrowserDebuggingProfile | None = None,
+    browser_surface: BrowserSurfaceProfile | None = None,
 ) -> str:
     config = _build_config_data(
         remote_run_directory,
@@ -729,6 +764,7 @@ def _build_config_json(
         guest_user,
         ssh_agent_socket,
         browser_debugging,
+        browser_surface,
     )
     return f"{json.dumps(config, indent=2)}\n"
 
@@ -760,6 +796,33 @@ def _get_existing_browser_profile(
     return browser_debugging.existing_browser_profile
 
 
+def _get_browser_chromium_arguments(
+    browser_surface: BrowserSurfaceProfile | None,
+) -> list[str]:
+    if browser_surface is None:
+        return []
+
+    return list(browser_surface.chromium_arguments)
+
+
+def _get_allow_camera_capture(
+    browser_surface: BrowserSurfaceProfile | None,
+) -> bool:
+    if browser_surface is None:
+        return True
+
+    return browser_surface.allow_camera_capture
+
+
+def _get_allow_microphone_capture(
+    browser_surface: BrowserSurfaceProfile | None,
+) -> bool:
+    if browser_surface is None:
+        return True
+
+    return browser_surface.allow_microphone_capture
+
+
 def _build_docker_run_command(
     configuration: DockerConfiguration,
     run_directory: Path,
@@ -784,7 +847,7 @@ def _build_docker_run_command(
         "--init",
     ]
     command.extend(_build_ipc_options(configuration))
-    command.extend(_build_security_options(configuration))
+    command.extend(_build_security_options(configuration, run_directory))
     command.extend(
         [
             "--mount",
@@ -797,6 +860,7 @@ def _build_docker_run_command(
     )
     if network_name is not None:
         command.extend(["--network", network_name])
+    command.extend(_build_dns_policy_options(configuration, gateway_ip_address))
     command.extend(configuration.profile.container_run_options)
     command.extend(_build_readonly_denied_mount_options(configuration, run_directory))
     command.extend(_build_socket_mount_options(configuration))
@@ -856,13 +920,33 @@ def _build_ipc_options(configuration: DockerConfiguration) -> list[str]:
     return options
 
 
-def _build_security_options(configuration: DockerConfiguration) -> list[str]:
+def _build_security_options(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+) -> list[str]:
     options = []
     if configuration.profile.cgroupns_mode is not None:
         options.append(f"--cgroupns={configuration.profile.cgroupns_mode}")
 
     if configuration.profile.pids_limit is not None:
         options.extend(["--pids-limit", str(configuration.profile.pids_limit)])
+
+    if configuration.profile.memory is not None:
+        options.extend(["--memory", configuration.profile.memory])
+
+    if configuration.profile.memory_swap is not None:
+        options.extend(["--memory-swap", configuration.profile.memory_swap])
+
+    if configuration.profile.cpus is not None:
+        options.extend(["--cpus", configuration.profile.cpus])
+
+    for ulimit in configuration.profile.ulimits:
+        options.extend(
+            [
+                "--ulimit",
+                f"{ulimit.name}={ulimit.soft}:{ulimit.hard}",
+            ]
+        )
 
     for capability in configuration.profile.cap_drop:
         options.append(f"--cap-drop={capability}")
@@ -873,7 +957,46 @@ def _build_security_options(configuration: DockerConfiguration) -> list[str]:
     for security_option in configuration.profile.security_options:
         options.extend(["--security-opt", security_option])
 
+    if configuration.profile.seccomp_profile is not None:
+        seccomp_path = run_directory / _SECCOMP_PROFILE_FILE_NAME
+        options.extend(["--security-opt", f"seccomp={seccomp_path}"])
+
     return options
+
+
+def _build_dns_policy_options(
+    configuration: DockerConfiguration,
+    gateway_ip_address: str | None,
+) -> list[str]:
+    dns_policy = configuration.profile.network_dns_policy
+    if dns_policy is None:
+        return []
+
+    options: list[str] = []
+    dns_address = _get_dns_policy_address(dns_policy, gateway_ip_address)
+    options.extend(["--dns", dns_address])
+    for dns_option in dns_policy.dns_options:
+        options.extend(["--dns-option", dns_option])
+
+    for hostname in dns_policy.blocked_hostnames:
+        options.extend(
+            [
+                "--add-host",
+                f"{hostname}:{dns_policy.blocked_hostname_address}",
+            ]
+        )
+
+    return options
+
+
+def _get_dns_policy_address(
+    dns_policy: NetworkDnsPolicy,
+    gateway_ip_address: str | None,
+) -> str:
+    if dns_policy.use_gateway_as_dns and gateway_ip_address is not None:
+        return gateway_ip_address
+
+    return dns_policy.fallback_dns_address
 
 
 def _build_source_mount(configuration: DockerConfiguration) -> str:
