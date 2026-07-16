@@ -540,7 +540,8 @@ class G21_T09:
 
             if (
                 completed.returncode == 0
-                and _g28_SYSTEMD_USER_UNIT_NAME in combined_output
+                and _g28_SYSTEMD_USER_UNIT_NAME in completed.stdout
+                and "installed=true" in completed.stdout
             ):
                 return InvocationResult(
                     outcome=Outcome.ALLOWED,
@@ -1006,7 +1007,8 @@ def _g28_probe_user_crontab_with_tool() -> str:
 
 def _g28_run_shell_systemd_user_unit_probe() -> subprocess.CompletedProcess[str]:
     script = f"""
-set -u
+set -eu
+command -v systemctl >/dev/null 2>&1 || exit 127
 unit_dir="$HOME/.config/systemd/user"
 unit_path="$unit_dir/{_g28_SYSTEMD_USER_UNIT_NAME}"
 cleanup() {{
@@ -1037,7 +1039,11 @@ def _g28_systemd_user_unit_probe_outcome(
     completed: subprocess.CompletedProcess[str],
     combined_output: str,
 ) -> Outcome:
-    if completed.returncode == 0 and _g28_SYSTEMD_USER_UNIT_NAME in combined_output:
+    if (
+        completed.returncode == 0
+        and _g28_SYSTEMD_USER_UNIT_NAME in completed.stdout
+        and "installed=true" in completed.stdout
+    ):
         return Outcome.ALLOWED
     if completed.returncode == 127 or _g28_systemd_user_service_is_unavailable(
         combined_output

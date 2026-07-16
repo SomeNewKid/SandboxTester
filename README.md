@@ -485,6 +485,15 @@ leaving GPU detail probing available for separate measurement. This keeps the
 normal Python, Playwright, Chromium, and OpenAI API workload available without
 advertising most host peripheral surfaces to the agent.
 
+The `persistence-control` profile starts from the same runtime hardening as
+`hardware-device-control`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:persistence-control` so user-level persistence
+configuration paths can be narrowed and measured independently. It extends the
+read-only persistence directory policy to cover common systemd user unit paths
+under the temporary home and XDG config trees. This prevents probes from
+creating user service unit files while preserving the broader writable config
+space needed by Python, Playwright, and Chromium.
+
 The file protocol for each Docker run is:
 
 ```text

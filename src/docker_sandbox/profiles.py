@@ -53,6 +53,8 @@ HARDWARE_DEVICE_CONTROL_PROFILE_NAME = "hardware-device-control"
 HARDWARE_DEVICE_CONTROL_IMAGE_NAME = (
     "sandbox-tester/docker-sandbox:hardware-device-control"
 )
+PERSISTENCE_CONTROL_PROFILE_NAME = "persistence-control"
+PERSISTENCE_CONTROL_IMAGE_NAME = "sandbox-tester/docker-sandbox:persistence-control"
 
 _PROFILES: dict[str, DockerProfile] = {
     BASELINE_PROFILE_NAME: DockerProfile(
@@ -1037,7 +1039,7 @@ _PROFILES[SYSTEM_CONFIG_CONTROL_PROFILE_NAME] = replace(
         "--build-arg",
         "SANDBOX_REMOVE_PACKAGE_METADATA=true",
     ),
-    readonly_startup_item_directories=(
+    readonly_persistence_directories=(
         "/tmp/sandbox-home/.config/autostart",
         "/tmp/sandbox-config/autostart",
     ),
@@ -1055,6 +1057,24 @@ _PROFILES[HARDWARE_DEVICE_CONTROL_PROFILE_NAME] = replace(
     environment=(
         *_PROFILES[SYSTEM_CONFIG_CONTROL_PROFILE_NAME].environment,
         EnvironmentVariablePolicy("SANDBOX_DENY_HARDWARE_DEVICE_ENUMERATION", "1"),
+    ),
+)
+
+_PROFILES[PERSISTENCE_CONTROL_PROFILE_NAME] = replace(
+    _PROFILES[HARDWARE_DEVICE_CONTROL_PROFILE_NAME],
+    name=PERSISTENCE_CONTROL_PROFILE_NAME,
+    description=(
+        "Start from the hardware-device-control hardening profile so user "
+        "persistence configuration paths can be narrowed and measured "
+        "independently."
+    ),
+    image_name=PERSISTENCE_CONTROL_IMAGE_NAME,
+    readonly_persistence_directories=(
+        *_PROFILES[
+            HARDWARE_DEVICE_CONTROL_PROFILE_NAME
+        ].readonly_persistence_directories,
+        "/tmp/sandbox-home/.config/systemd/user",
+        "/tmp/sandbox-config/systemd/user",
     ),
 )
 

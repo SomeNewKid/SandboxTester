@@ -30,6 +30,7 @@ from docker_sandbox.profiles import (
     MINIMIZED_IMAGE_IMAGE_NAME,
     NETWORK_EGRESS_IMAGE_NAME,
     NETWORK_SOCKET_CONTROL_IMAGE_NAME,
+    PERSISTENCE_CONTROL_IMAGE_NAME,
     READONLY_FS_IMAGE_NAME,
     RESOURCE_LIMITS_IMAGE_NAME,
     RUNTIME_CONTROL_IMAGE_NAME,
@@ -1321,7 +1322,7 @@ def test_system_config_control_profile_adds_package_and_startup_guards(
         "--build-arg",
         "SANDBOX_REMOVE_PACKAGE_METADATA=true",
     )
-    assert system_profile.readonly_startup_item_directories == (
+    assert system_profile.readonly_persistence_directories == (
         "/tmp/sandbox-home/.config/autostart",
         "/tmp/sandbox-config/autostart",
     )
@@ -1352,10 +1353,39 @@ def test_hardware_device_control_profile_adds_device_enumeration_guard(
     assert (
         hardware_profile.image_build_arguments == system_profile.image_build_arguments
     )
-    assert hardware_profile.readonly_startup_item_directories == (
-        system_profile.readonly_startup_item_directories
+    assert hardware_profile.readonly_persistence_directories == (
+        system_profile.readonly_persistence_directories
     )
     assert "SANDBOX_DENY_HARDWARE_DEVICE_ENUMERATION=1" in command
+
+
+def test_persistence_control_profile_adds_systemd_user_unit_guards(
+    tmp_path: Path,
+) -> None:
+    """Verify persistence-control adds readonly systemd user unit paths."""
+    hardware_profile = get_docker_profile("hardware-device-control")
+    persistence_profile = get_docker_profile("persistence-control")
+    configuration = _create_configuration(tmp_path, persistence_profile)
+    run_directory = tmp_path / ".docker_sandbox" / "runs" / "run-test"
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=run_directory,
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+
+    assert persistence_profile.image_name == PERSISTENCE_CONTROL_IMAGE_NAME
+    assert persistence_profile.image_name != hardware_profile.image_name
+    assert persistence_profile.readonly_persistence_directories == (
+        *hardware_profile.readonly_persistence_directories,
+        "/tmp/sandbox-home/.config/systemd/user",
+        "/tmp/sandbox-config/systemd/user",
+    )
+    assert "target=/tmp/sandbox-home/.config/systemd/user,readonly" in " ".join(command)
+    assert "target=/tmp/sandbox-config/systemd/user,readonly" in " ".join(command)
 
 
 def test_denied_executable_stubs_are_temporary_run_scaffolding(

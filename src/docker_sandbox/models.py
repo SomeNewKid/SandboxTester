@@ -206,7 +206,7 @@ class DockerProfile:
     gpg_agent_socket: AgentSocketForward | None = None
     allow_desktop_automation_channel: bool = False
     remove_desktop_automation_tools: bool = False
-    readonly_startup_item_directories: tuple[str, ...] = ()
+    readonly_persistence_directories: tuple[str, ...] = ()
     browser_debugging: BrowserDebuggingProfile | None = None
     browser_surface: BrowserSurfaceProfile | None = BrowserSurfaceProfile()
     environment: tuple[EnvironmentVariablePolicy, ...] = ()
