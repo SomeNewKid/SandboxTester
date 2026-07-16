@@ -22,6 +22,7 @@ from docker_sandbox.profiles import (
     AMBIENT_SERVICES_IMAGE_NAME,
     BASELINE_IMAGE_NAME,
     BROWSER_SURFACE_IMAGE_NAME,
+    DESKTOP_CHANNEL_CONTROL_IMAGE_NAME,
     DNS_PROXY_CONTROL_IMAGE_NAME,
     EXECUTION_CONTROL_IMAGE_NAME,
     FILESYSTEM_VISIBILITY_IMAGE_NAME,
@@ -121,6 +122,8 @@ def test_dockerfile_installs_dependencies_without_copying_source() -> None:
     assert "SANDBOX_MINIMIZE_IMAGE" in dockerfile_text
     assert "ARG SANDBOX_REMOVE_PYTHON_PACKAGING=false" in dockerfile_text
     assert "SANDBOX_REMOVE_PYTHON_PACKAGING" in dockerfile_text
+    assert "ARG SANDBOX_REMOVE_DESKTOP_AUTOMATION=false" in dockerfile_text
+    assert "SANDBOX_REMOVE_DESKTOP_AUTOMATION" in dockerfile_text
     assert "runtime_sitecustomize.py" in dockerfile_text
     assert "sitecustomize.py" in dockerfile_text
     assert "/usr/local/bin/pip" in dockerfile_text
@@ -131,6 +134,7 @@ def test_dockerfile_installs_dependencies_without_copying_source() -> None:
     assert "distutils-precedence.pth" in dockerfile_text
     assert "apt-get purge --yes --auto-remove" in dockerfile_text
     assert "/usr/bin/apt-get" in dockerfile_text
+    assert "/usr/bin/gdbus" in dockerfile_text
     assert "COPY src" not in dockerfile_text
     assert "pip install --no-cache-dir -e ." not in dockerfile_text
     assert "pip install --no-cache-dir openai paramiko pillow playwright pymysql" in (
@@ -1208,6 +1212,79 @@ def test_network_socket_control_profile_adds_socket_guards(
         in command
     )
     assert "metadata.google.internal:0.0.0.0" in command
+
+
+def test_desktop_channel_control_profile_blocks_desktop_channel_query(
+    tmp_path: Path,
+) -> None:
+    """Verify desktop-channel-control blocks desktop automation indicators."""
+    network_socket_profile = get_docker_profile("network-socket-control")
+    desktop_profile = get_docker_profile("desktop-channel-control")
+    configuration = _create_configuration(tmp_path, desktop_profile)
+    run_directory = tmp_path / ".docker_sandbox" / "runs" / "run-test"
+
+    _prepare_denied_executable_stubs(configuration, run_directory)
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=run_directory,
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        environment_variables={
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/dbus",
+            "DISPLAY": ":0",
+            "WAYLAND_DISPLAY": "wayland-0",
+            "XAUTHORITY": "/tmp/.Xauthority",
+        },
+        gateway_ip_address="172.20.0.2",
+    )
+
+    assert desktop_profile.image_name == DESKTOP_CHANNEL_CONTROL_IMAGE_NAME
+    assert desktop_profile.image_name != network_socket_profile.image_name
+    assert desktop_profile.image_build_arguments == (
+        *network_socket_profile.image_build_arguments,
+        "--build-arg",
+        "SANDBOX_REMOVE_DESKTOP_AUTOMATION=true",
+    )
+    assert not desktop_profile.allow_desktop_automation_channel
+    assert desktop_profile.remove_desktop_automation_tools
+    assert "DBUS_SESSION_BUS_ADDRESS=" not in command
+    assert "DISPLAY=:0" not in command
+    assert "WAYLAND_DISPLAY=wayland-0" not in command
+    assert "XAUTHORITY=/tmp/.Xauthority" not in command
+    assert not any("target=/usr/bin/gdbus" in item for item in command)
+    assert not any("target=/usr/bin/qdbus" in item for item in command)
+    assert not any("target=/usr/bin/wmctrl" in item for item in command)
+    assert not any("target=/usr/bin/xdotool" in item for item in command)
+
+
+def test_desktop_automation_channel_is_profile_opt_in(tmp_path: Path) -> None:
+    """Verify future profiles can opt in to desktop automation channel access."""
+    profile = DockerProfile(
+        name="desktop-opt-in",
+        description="Test desktop automation opt-in.",
+        image_name="sandbox-tester/docker-sandbox:desktop-opt-in",
+        allow_desktop_automation_channel=True,
+        denied_executable_paths=(),
+    )
+    configuration = _create_configuration(tmp_path, profile)
+    run_directory = tmp_path / ".docker_sandbox" / "runs" / "run-test"
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=run_directory,
+        container_name="sandbox-tester-run-test",
+        remote_run_directory="/tmp/sandbox-tester/run-test",
+        environment_variables={
+            "DISPLAY": ":0",
+            "WAYLAND_DISPLAY": "wayland-0",
+        },
+    )
+
+    assert "DISPLAY=:0" in command
+    assert "WAYLAND_DISPLAY=wayland-0" in command
+    assert not any("target=/usr/bin/gdbus,readonly" in item for item in command)
+    assert not any("target=/usr/bin/qdbus,readonly" in item for item in command)
 
 
 def test_denied_executable_stubs_are_temporary_run_scaffolding(

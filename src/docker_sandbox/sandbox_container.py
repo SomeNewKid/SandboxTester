@@ -38,6 +38,20 @@ _SECCOMP_PROFILE_FILE_NAME = "seccomp-profile.json"
 _GATEWAY_START_RESULTS_FILE_NAME = "gateway-start-results.json"
 _GATEWAY_LOG_FILE_NAME = "gateway-logs.json"
 _DENIED_EXECUTABLE_SOURCE_DIRECTORY = "denied-executables"
+_DESKTOP_AUTOMATION_ENVIRONMENT_NAMES = (
+    "DBUS_SESSION_BUS_ADDRESS",
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+)
+_DESKTOP_AUTOMATION_EXECUTABLE_PATHS = (
+    "/usr/bin/busctl",
+    "/usr/bin/dbus-send",
+    "/usr/bin/gdbus",
+    "/usr/bin/qdbus",
+    "/usr/bin/wmctrl",
+    "/usr/bin/xdotool",
+)
 _ALLOWED_FILE_CONTENT = "This is a test file for the allowed directory."
 _DENIED_FILE_CONTENT = "This is a test file for the denied directory."
 _HIDDEN_ALLOWED_FILE_CONTENT = "This is a hidden file."
@@ -257,6 +271,7 @@ def _get_denied_executable_targets(
     configuration: DockerConfiguration,
 ) -> tuple[str, ...]:
     targets = []
+
     for executable_name in configuration.profile.denied_executables:
         _validate_executable_name(executable_name)
         targets.append(f"/usr/bin/{executable_name}")
@@ -264,6 +279,13 @@ def _get_denied_executable_targets(
     for executable_path in configuration.profile.denied_executable_paths:
         _validate_executable_path(executable_path)
         targets.append(executable_path)
+
+    if configuration.profile.remove_desktop_automation_tools:
+        targets = [
+            target
+            for target in targets
+            if target not in _DESKTOP_AUTOMATION_EXECUTABLE_PATHS
+        ]
 
     return tuple(dict.fromkeys(targets))
 
@@ -1029,6 +1051,10 @@ def _build_container_environment(
         container_environment,
         configuration.profile.environment,
     )
+    _apply_desktop_automation_policy(
+        container_environment,
+        configuration.profile.allow_desktop_automation_channel,
+    )
     gateway = configuration.profile.network_gateway
     if gateway is not None:
         proxy_host = gateway_ip_address or gateway.proxy_host
@@ -1054,6 +1080,17 @@ def _apply_environment_policies(
             continue
 
         environment[policy.name] = policy.value
+
+
+def _apply_desktop_automation_policy(
+    environment: dict[str, str],
+    allow_desktop_automation_channel: bool,
+) -> None:
+    if allow_desktop_automation_channel:
+        return
+
+    for name in _DESKTOP_AUTOMATION_ENVIRONMENT_NAMES:
+        environment.pop(name, None)
 
 
 def _build_readonly_denied_mount_options(

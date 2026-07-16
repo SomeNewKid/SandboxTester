@@ -453,6 +453,17 @@ Docker's `net.ipv4.ip_unprivileged_port_start` sysctl back to `1024`, expands
 for successful metadata access, and maps `metadata.google.internal` to
 `0.0.0.0` alongside the other blocked Docker host shortcut names.
 
+The `desktop-channel-control` profile starts from the same runtime hardening as
+`network-socket-control`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:desktop-channel-control` so desktop automation
+channel controls can be added and measured independently. Desktop automation
+channels are denied by default for Docker profiles: the harness removes display,
+Wayland, D-Bus, and X authority environment hints, and this profile's image
+removes common desktop query tools such as `gdbus`, `qdbus`, `wmctrl`, and
+`xdotool`. Future profiles can explicitly opt back in to desktop automation
+channel access by enabling the profile's desktop automation flag and building
+from an image that keeps the required tools.
+
 The file protocol for each Docker run is:
 
 ```text

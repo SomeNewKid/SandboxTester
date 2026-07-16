@@ -2,6 +2,7 @@ FROM mcr.microsoft.com/playwright/python:v1.61.0-noble
 
 ARG SANDBOX_MINIMIZE_IMAGE=false
 ARG SANDBOX_REMOVE_PYTHON_PACKAGING=false
+ARG SANDBOX_REMOVE_DESKTOP_AUTOMATION=false
 
 WORKDIR /opt/sandbox-tester
 
@@ -82,4 +83,14 @@ RUN if [ "${SANDBOX_REMOVE_PYTHON_PACKAGING}" = "true" ]; then \
             /usr/bin/pip3 \
             /usr/bin/pip3.* \
             /usr/bin/wheel; \
+    fi
+
+RUN if [ "${SANDBOX_REMOVE_DESKTOP_AUTOMATION}" = "true" ]; then \
+        rm -f \
+            /usr/bin/busctl \
+            /usr/bin/dbus-send \
+            /usr/bin/gdbus \
+            /usr/bin/qdbus \
+            /usr/bin/wmctrl \
+            /usr/bin/xdotool; \
     fi

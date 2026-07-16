@@ -204,6 +204,8 @@ class DockerProfile:
     socket_mounts: tuple[SocketMount, ...] = ()
     ssh_agent_socket: AgentSocketForward | None = None
     gpg_agent_socket: AgentSocketForward | None = None
+    allow_desktop_automation_channel: bool = False
+    remove_desktop_automation_tools: bool = False
     browser_debugging: BrowserDebuggingProfile | None = None
     browser_surface: BrowserSurfaceProfile | None = BrowserSurfaceProfile()
     environment: tuple[EnvironmentVariablePolicy, ...] = ()

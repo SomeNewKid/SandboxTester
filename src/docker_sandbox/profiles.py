@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .models import (
     BrowserSurfaceProfile,
     DockerProfile,
@@ -40,6 +42,10 @@ RUNTIME_CONTROL_IMAGE_NAME = "sandbox-tester/docker-sandbox:runtime-control"
 NETWORK_SOCKET_CONTROL_PROFILE_NAME = "network-socket-control"
 NETWORK_SOCKET_CONTROL_IMAGE_NAME = (
     "sandbox-tester/docker-sandbox:network-socket-control"
+)
+DESKTOP_CHANNEL_CONTROL_PROFILE_NAME = "desktop-channel-control"
+DESKTOP_CHANNEL_CONTROL_IMAGE_NAME = (
+    "sandbox-tester/docker-sandbox:desktop-channel-control"
 )
 
 _PROFILES: dict[str, DockerProfile] = {
@@ -986,6 +992,25 @@ _PROFILES: dict[str, DockerProfile] = {
         ),
     ),
 }
+
+_PROFILES[DESKTOP_CHANNEL_CONTROL_PROFILE_NAME] = replace(
+    _PROFILES[NETWORK_SOCKET_CONTROL_PROFILE_NAME],
+    name=DESKTOP_CHANNEL_CONTROL_PROFILE_NAME,
+    description=(
+        "Start from the network-socket-control hardening profile so desktop "
+        "automation channel controls can be added and measured independently."
+    ),
+    image_name=DESKTOP_CHANNEL_CONTROL_IMAGE_NAME,
+    image_build_arguments=(
+        "--build-arg",
+        "SANDBOX_MINIMIZE_IMAGE=true",
+        "--build-arg",
+        "SANDBOX_REMOVE_PYTHON_PACKAGING=true",
+        "--build-arg",
+        "SANDBOX_REMOVE_DESKTOP_AUTOMATION=true",
+    ),
+    remove_desktop_automation_tools=True,
+)
 
 SUPPORTED_PROFILE_NAMES = tuple(sorted(_PROFILES))
 
