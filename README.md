@@ -400,6 +400,18 @@ direct DNS lookups fail closed because the gateway is not a general DNS
 resolver. It also uses short DNS timeouts and maps Docker host shortcut names
 such as `host.docker.internal` to `0.0.0.0` inside the sandbox container.
 
+The `minimized-image` profile starts from the same runtime hardening as
+`dns-proxy-control`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:minimized-image` and passes the Dockerfile build
+argument `SANDBOX_MINIMIZE_IMAGE=true`. The shared Dockerfile uses that flag to
+remove or purge obvious nonessential command-line tools from the image after the
+Python, Playwright, Chromium, font, and runtime dependencies have been prepared.
+This includes package-management entry points, SSH/GPG tools, Git, Perl, service
+management tools, namespace/admin helpers, and other command families already
+blocked by the runtime denial-stub policy. The runtime stubs remain in place as
+defense in depth, but the image now also attempts to make those tools absent
+before the container starts.
+
 The file protocol for each Docker run is:
 
 ```text

@@ -23,6 +23,7 @@ from docker_sandbox.profiles import (
     BROWSER_SURFACE_IMAGE_NAME,
     DNS_PROXY_CONTROL_IMAGE_NAME,
     EXECUTION_CONTROL_IMAGE_NAME,
+    MINIMIZED_IMAGE_IMAGE_NAME,
     NETWORK_EGRESS_IMAGE_NAME,
     READONLY_FS_IMAGE_NAME,
     RESOURCE_LIMITS_IMAGE_NAME,
@@ -112,6 +113,10 @@ def test_dockerfile_installs_dependencies_without_copying_source() -> None:
         encoding="utf-8"
     )
 
+    assert "ARG SANDBOX_MINIMIZE_IMAGE=false" in dockerfile_text
+    assert "SANDBOX_MINIMIZE_IMAGE" in dockerfile_text
+    assert "apt-get purge --yes --auto-remove" in dockerfile_text
+    assert "/usr/bin/apt-get" in dockerfile_text
     assert "COPY src" not in dockerfile_text
     assert "pip install --no-cache-dir -e ." not in dockerfile_text
     assert "pip install --no-cache-dir openai paramiko pillow playwright pymysql" in (
@@ -852,6 +857,81 @@ def test_dns_proxy_control_profile_fails_closed_without_gateway_ip(
 
     assert "--dns" in command
     assert "127.0.0.1" in command
+
+
+def test_minimized_image_profile_starts_from_dns_proxy_control_profile() -> None:
+    """Verify minimized-image begins as a dns-proxy-control clone."""
+    dns_profile = get_docker_profile("dns-proxy-control")
+    minimized_profile = get_docker_profile("minimized-image")
+
+    assert minimized_profile.image_name == MINIMIZED_IMAGE_IMAGE_NAME
+    assert minimized_profile.image_name != dns_profile.image_name
+    assert minimized_profile.image_build_arguments == (
+        "--build-arg",
+        "SANDBOX_MINIMIZE_IMAGE=true",
+    )
+    assert minimized_profile.ipc_mode == dns_profile.ipc_mode
+    assert minimized_profile.shm_size == dns_profile.shm_size
+    assert minimized_profile.cgroupns_mode == dns_profile.cgroupns_mode
+    assert minimized_profile.pids_limit == dns_profile.pids_limit
+    assert minimized_profile.memory == dns_profile.memory
+    assert minimized_profile.memory_swap == dns_profile.memory_swap
+    assert minimized_profile.cpus == dns_profile.cpus
+    assert minimized_profile.ulimits == dns_profile.ulimits
+    assert minimized_profile.cap_drop == dns_profile.cap_drop
+    assert minimized_profile.cap_add == dns_profile.cap_add
+    assert minimized_profile.security_options == dns_profile.security_options
+    assert minimized_profile.seccomp_profile == dns_profile.seccomp_profile
+    assert minimized_profile.container_run_options == dns_profile.container_run_options
+    assert minimized_profile.remote_run_root == dns_profile.remote_run_root
+    assert (
+        minimized_profile.allowed_directory_template
+        == dns_profile.allowed_directory_template
+    )
+    assert (
+        minimized_profile.denied_directory_template
+        == dns_profile.denied_directory_template
+    )
+    assert (
+        minimized_profile.readonly_denied_mount_target
+        == dns_profile.readonly_denied_mount_target
+    )
+    assert minimized_profile.landlock_rules == dns_profile.landlock_rules
+    assert minimized_profile.network_gateway == dns_profile.network_gateway
+    assert minimized_profile.network_dns_policy == dns_profile.network_dns_policy
+    assert minimized_profile.socket_mounts == dns_profile.socket_mounts
+    assert minimized_profile.ssh_agent_socket == dns_profile.ssh_agent_socket
+    assert minimized_profile.gpg_agent_socket == dns_profile.gpg_agent_socket
+    assert minimized_profile.browser_debugging == dns_profile.browser_debugging
+    assert minimized_profile.browser_surface == dns_profile.browser_surface
+    assert minimized_profile.environment == dns_profile.environment
+    assert minimized_profile.denied_executables == dns_profile.denied_executables
+    assert (
+        minimized_profile.denied_executable_paths == dns_profile.denied_executable_paths
+    )
+
+
+def test_minimized_image_profile_uses_minimization_build_argument(
+    tmp_path: Path,
+) -> None:
+    """Verify minimized-image passes the Dockerfile minimization flag."""
+    configuration = _create_configuration(
+        tmp_path, get_docker_profile("minimized-image")
+    )
+
+    command = _build_image_command(configuration)
+
+    assert command == [
+        "docker",
+        "build",
+        "--file",
+        str(tmp_path / "Dockerfile"),
+        "--tag",
+        MINIMIZED_IMAGE_IMAGE_NAME,
+        "--build-arg",
+        "SANDBOX_MINIMIZE_IMAGE=true",
+        str(tmp_path),
+    ]
 
 
 def test_denied_executable_stubs_are_temporary_run_scaffolding(
