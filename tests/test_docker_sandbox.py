@@ -33,6 +33,7 @@ from docker_sandbox.profiles import (
     RESOURCE_LIMITS_IMAGE_NAME,
     RUNTIME_CONTROL_IMAGE_NAME,
     SYSCALL_CONTROL_IMAGE_NAME,
+    SYSTEM_CONFIG_CONTROL_IMAGE_NAME,
     get_docker_profile,
 )
 from docker_sandbox.sandbox_container import (
@@ -124,6 +125,8 @@ def test_dockerfile_installs_dependencies_without_copying_source() -> None:
     assert "SANDBOX_REMOVE_PYTHON_PACKAGING" in dockerfile_text
     assert "ARG SANDBOX_REMOVE_DESKTOP_AUTOMATION=false" in dockerfile_text
     assert "SANDBOX_REMOVE_DESKTOP_AUTOMATION" in dockerfile_text
+    assert "ARG SANDBOX_REMOVE_PACKAGE_METADATA=false" in dockerfile_text
+    assert "SANDBOX_REMOVE_PACKAGE_METADATA" in dockerfile_text
     assert "runtime_sitecustomize.py" in dockerfile_text
     assert "sitecustomize.py" in dockerfile_text
     assert "/usr/local/bin/pip" in dockerfile_text
@@ -135,6 +138,7 @@ def test_dockerfile_installs_dependencies_without_copying_source() -> None:
     assert "apt-get purge --yes --auto-remove" in dockerfile_text
     assert "/usr/bin/apt-get" in dockerfile_text
     assert "/usr/bin/gdbus" in dockerfile_text
+    assert "/var/lib/dpkg" in dockerfile_text
     assert "COPY src" not in dockerfile_text
     assert "pip install --no-cache-dir -e ." not in dockerfile_text
     assert "pip install --no-cache-dir openai paramiko pillow playwright pymysql" in (
@@ -1285,6 +1289,39 @@ def test_desktop_automation_channel_is_profile_opt_in(tmp_path: Path) -> None:
     assert "WAYLAND_DISPLAY=wayland-0" in command
     assert not any("target=/usr/bin/gdbus,readonly" in item for item in command)
     assert not any("target=/usr/bin/qdbus,readonly" in item for item in command)
+
+
+def test_system_config_control_profile_adds_package_and_startup_guards(
+    tmp_path: Path,
+) -> None:
+    """Verify system-config-control adds package metadata and startup guards."""
+    desktop_profile = get_docker_profile("desktop-channel-control")
+    system_profile = get_docker_profile("system-config-control")
+    configuration = _create_configuration(tmp_path, system_profile)
+    run_directory = tmp_path / ".docker_sandbox" / "runs" / "run-test"
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=run_directory,
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+
+    assert system_profile.image_name == SYSTEM_CONFIG_CONTROL_IMAGE_NAME
+    assert system_profile.image_name != desktop_profile.image_name
+    assert system_profile.image_build_arguments == (
+        *desktop_profile.image_build_arguments,
+        "--build-arg",
+        "SANDBOX_REMOVE_PACKAGE_METADATA=true",
+    )
+    assert system_profile.readonly_startup_item_directories == (
+        "/tmp/sandbox-home/.config/autostart",
+        "/tmp/sandbox-config/autostart",
+    )
+    assert "target=/tmp/sandbox-home/.config/autostart,readonly" in " ".join(command)
+    assert "target=/tmp/sandbox-config/autostart,readonly" in " ".join(command)
 
 
 def test_denied_executable_stubs_are_temporary_run_scaffolding(

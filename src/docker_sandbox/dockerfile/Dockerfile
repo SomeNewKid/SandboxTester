@@ -3,6 +3,7 @@ FROM mcr.microsoft.com/playwright/python:v1.61.0-noble
 ARG SANDBOX_MINIMIZE_IMAGE=false
 ARG SANDBOX_REMOVE_PYTHON_PACKAGING=false
 ARG SANDBOX_REMOVE_DESKTOP_AUTOMATION=false
+ARG SANDBOX_REMOVE_PACKAGE_METADATA=false
 
 WORKDIR /opt/sandbox-tester
 
@@ -93,4 +94,12 @@ RUN if [ "${SANDBOX_REMOVE_DESKTOP_AUTOMATION}" = "true" ]; then \
             /usr/bin/qdbus \
             /usr/bin/wmctrl \
             /usr/bin/xdotool; \
+    fi
+
+RUN if [ "${SANDBOX_REMOVE_PACKAGE_METADATA}" = "true" ]; then \
+        rm -rf \
+            /var/cache/apt \
+            /var/lib/apt \
+            /var/lib/dpkg \
+            /var/log/apt; \
     fi

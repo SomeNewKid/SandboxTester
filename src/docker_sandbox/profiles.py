@@ -47,6 +47,8 @@ DESKTOP_CHANNEL_CONTROL_PROFILE_NAME = "desktop-channel-control"
 DESKTOP_CHANNEL_CONTROL_IMAGE_NAME = (
     "sandbox-tester/docker-sandbox:desktop-channel-control"
 )
+SYSTEM_CONFIG_CONTROL_PROFILE_NAME = "system-config-control"
+SYSTEM_CONFIG_CONTROL_IMAGE_NAME = "sandbox-tester/docker-sandbox:system-config-control"
 
 _PROFILES: dict[str, DockerProfile] = {
     BASELINE_PROFILE_NAME: DockerProfile(
@@ -1010,6 +1012,31 @@ _PROFILES[DESKTOP_CHANNEL_CONTROL_PROFILE_NAME] = replace(
         "SANDBOX_REMOVE_DESKTOP_AUTOMATION=true",
     ),
     remove_desktop_automation_tools=True,
+)
+
+_PROFILES[SYSTEM_CONFIG_CONTROL_PROFILE_NAME] = replace(
+    _PROFILES[DESKTOP_CHANNEL_CONTROL_PROFILE_NAME],
+    name=SYSTEM_CONFIG_CONTROL_PROFILE_NAME,
+    description=(
+        "Start from the desktop-channel-control hardening profile so system "
+        "configuration and startup-item controls can be added and measured "
+        "independently."
+    ),
+    image_name=SYSTEM_CONFIG_CONTROL_IMAGE_NAME,
+    image_build_arguments=(
+        "--build-arg",
+        "SANDBOX_MINIMIZE_IMAGE=true",
+        "--build-arg",
+        "SANDBOX_REMOVE_PYTHON_PACKAGING=true",
+        "--build-arg",
+        "SANDBOX_REMOVE_DESKTOP_AUTOMATION=true",
+        "--build-arg",
+        "SANDBOX_REMOVE_PACKAGE_METADATA=true",
+    ),
+    readonly_startup_item_directories=(
+        "/tmp/sandbox-home/.config/autostart",
+        "/tmp/sandbox-config/autostart",
+    ),
 )
 
 SUPPORTED_PROFILE_NAMES = tuple(sorted(_PROFILES))

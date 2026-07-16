@@ -1411,7 +1411,18 @@ def _build_installed_software_alternate_attempts(
             title="Read installed software via apt list",
             bypass_class="installed_software_inventory",
             command_family="apt",
-            command=["sh", "-c", "apt list --installed 2>/dev/null | head -n 25"],
+            command=[
+                "sh",
+                "-c",
+                (
+                    "command -v apt >/dev/null 2>&1 "
+                    f"|| exit {_NO_SHELL_CANDIDATE_EXIT_CODE}; "
+                    "output=$(apt list --installed 2>/dev/null); "
+                    "status=$?; "
+                    'if [ "$status" -ne 0 ]; then exit "$status"; fi; '
+                    'printf "%s\\n" "$output" | head -n 25'
+                ),
+            ],
         )
     ]
 

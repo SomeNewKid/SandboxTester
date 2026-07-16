@@ -464,6 +464,17 @@ removes common desktop query tools such as `gdbus`, `qdbus`, `wmctrl`, and
 channel access by enabling the profile's desktop automation flag and building
 from an image that keeps the required tools.
 
+The `system-config-control` profile starts from the same runtime hardening as
+`desktop-channel-control`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:system-config-control` so system configuration
+and administration controls can be added and measured independently. Its image
+removes package-manager metadata such as the dpkg and apt databases after the
+runtime dependencies are installed, reducing the installed-software inventory
+available to the agent. The profile also mounts common user autostart
+directories as read-only, so startup-item probes cannot create autostart
+entries while the broader temporary home and config directories remain
+available for Python, Playwright, and Chromium.
+
 The file protocol for each Docker run is:
 
 ```text

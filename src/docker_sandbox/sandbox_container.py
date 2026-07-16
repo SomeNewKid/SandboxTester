@@ -38,6 +38,7 @@ _SECCOMP_PROFILE_FILE_NAME = "seccomp-profile.json"
 _GATEWAY_START_RESULTS_FILE_NAME = "gateway-start-results.json"
 _GATEWAY_LOG_FILE_NAME = "gateway-logs.json"
 _DENIED_EXECUTABLE_SOURCE_DIRECTORY = "denied-executables"
+_READONLY_STARTUP_SOURCE_DIRECTORY = "readonly-startup"
 _DESKTOP_AUTOMATION_ENVIRONMENT_NAMES = (
     "DBUS_SESSION_BUS_ADDRESS",
     "DISPLAY",
@@ -80,6 +81,7 @@ def run_sandbox_container(
     allowed_directory = _build_allowed_directory(configuration, remote_run_directory)
     denied_directory = _build_denied_directory(configuration, remote_run_directory)
     _prepare_readonly_denied_directory(configuration, run_directory)
+    _prepare_readonly_startup_directories(configuration, run_directory)
     _prepare_denied_executable_stubs(configuration, run_directory)
     _write_landlock_policy(configuration, run_directory)
     _write_seccomp_profile(configuration, run_directory)
@@ -129,6 +131,7 @@ def run_sandbox_container(
     )
     _write_gateway_logs(configuration, run_directory, gateway_container_name)
     _delete_readonly_denied_directory(configuration, run_directory)
+    _delete_readonly_startup_directory(configuration, run_directory)
     _delete_denied_executable_directory(configuration, run_directory)
     remove_command = _build_docker_remove_command(container_name)
     gateway_cleanup_commands = _build_gateway_cleanup_commands(
@@ -224,6 +227,19 @@ def _prepare_readonly_denied_directory(
     hidden_file.write_text(_HIDDEN_DENIED_FILE_CONTENT, encoding="utf-8")
 
 
+def _prepare_readonly_startup_directories(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+) -> None:
+    for target in configuration.profile.readonly_startup_item_directories:
+        _validate_container_directory(target)
+        source_directory = _build_readonly_startup_source_directory(
+            run_directory,
+            target,
+        )
+        source_directory.mkdir(parents=True, exist_ok=True)
+
+
 def _prepare_denied_executable_stubs(
     configuration: DockerConfiguration,
     run_directory: Path,
@@ -262,9 +278,26 @@ def _validate_executable_path(executable_path: str) -> None:
         raise ValueError(f"Invalid executable path: {executable_path!r}")
 
 
+def _validate_container_directory(directory: str) -> None:
+    path = PurePosixPath(directory)
+    if not path.is_absolute() or path.name in {"", ".", ".."}:
+        raise ValueError(f"Invalid container directory: {directory!r}")
+
+
 def _build_denied_executable_stub_name(target_path: str) -> str:
     _validate_executable_path(target_path)
     return target_path.strip("/").replace("/", "__")
+
+
+def _build_readonly_startup_source_directory(
+    run_directory: Path,
+    target: str,
+) -> Path:
+    return (
+        run_directory
+        / _READONLY_STARTUP_SOURCE_DIRECTORY
+        / target.strip("/").replace("/", "__")
+    )
 
 
 def _get_denied_executable_targets(
@@ -700,6 +733,26 @@ def _delete_readonly_denied_directory(
     shutil.rmtree(denied_source_directory, ignore_errors=True)
 
 
+def _delete_readonly_startup_directory(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+) -> None:
+    if not configuration.profile.readonly_startup_item_directories:
+        return
+
+    startup_source_directory = run_directory / _READONLY_STARTUP_SOURCE_DIRECTORY
+    resolved_run_directory = run_directory.resolve()
+    resolved_startup_source_directory = startup_source_directory.resolve()
+
+    if resolved_run_directory not in resolved_startup_source_directory.parents:
+        raise RuntimeError(
+            "Refusing to remove readonly startup fixture outside the run "
+            f"directory: {resolved_startup_source_directory}"
+        )
+
+    shutil.rmtree(startup_source_directory, ignore_errors=True)
+
+
 def _delete_denied_executable_directory(
     configuration: DockerConfiguration,
     run_directory: Path,
@@ -885,6 +938,7 @@ def _build_docker_run_command(
     command.extend(_build_dns_policy_options(configuration, gateway_ip_address))
     command.extend(configuration.profile.container_run_options)
     command.extend(_build_readonly_denied_mount_options(configuration, run_directory))
+    command.extend(_build_readonly_startup_mount_options(configuration, run_directory))
     command.extend(_build_socket_mount_options(configuration))
     command.extend(_build_agent_socket_mount_options(configuration))
     command.extend(_build_denied_executable_mount_options(configuration, run_directory))
@@ -1107,6 +1161,25 @@ def _build_readonly_denied_mount_options(
         "--mount",
         mount,
     ]
+
+
+def _build_readonly_startup_mount_options(
+    configuration: DockerConfiguration,
+    run_directory: Path,
+) -> list[str]:
+    options = []
+    for target in configuration.profile.readonly_startup_item_directories:
+        _validate_container_directory(target)
+        source = _build_readonly_startup_source_directory(run_directory, target)
+        mount = f"type=bind,source={source},target={target},readonly"
+        options.extend(
+            [
+                "--mount",
+                mount,
+            ]
+        )
+
+    return options
 
 
 def _build_socket_mount_options(configuration: DockerConfiguration) -> list[str]:
