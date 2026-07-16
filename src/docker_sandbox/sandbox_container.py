@@ -948,6 +948,9 @@ def _build_security_options(
             ]
         )
 
+    for sysctl in configuration.profile.sysctls:
+        options.extend(["--sysctl", f"{sysctl.name}={sysctl.value}"])
+
     for capability in configuration.profile.cap_drop:
         options.append(f"--cap-drop={capability}")
 
@@ -1030,12 +1033,14 @@ def _build_container_environment(
     if gateway is not None:
         proxy_host = gateway_ip_address or gateway.proxy_host
         proxy_url = f"http://{proxy_host}:{gateway.proxy_port}"
+        no_proxy_hosts = ("localhost", "127.0.0.1", *gateway.no_proxy_hosts)
+        no_proxy = ",".join(dict.fromkeys(no_proxy_hosts))
         container_environment["HTTP_PROXY"] = proxy_url
         container_environment["HTTPS_PROXY"] = proxy_url
-        container_environment["NO_PROXY"] = "localhost,127.0.0.1"
+        container_environment["NO_PROXY"] = no_proxy
         container_environment["http_proxy"] = proxy_url
         container_environment["https_proxy"] = proxy_url
-        container_environment["no_proxy"] = "localhost,127.0.0.1"
+        container_environment["no_proxy"] = no_proxy
     return container_environment
 
 

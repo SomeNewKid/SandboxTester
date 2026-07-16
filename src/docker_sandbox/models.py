@@ -22,6 +22,7 @@ class NetworkGatewayProfile:
     proxy_port: int
     allowed_domains: tuple[str, ...] = ()
     allowed_ip_addresses: tuple[str, ...] = ()
+    no_proxy_hosts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,14 @@ class DockerUlimit:
 
 
 @dataclass(frozen=True)
+class DockerSysctl:
+    """Docker sysctl setting for a hardening profile."""
+
+    name: str
+    value: str
+
+
+@dataclass(frozen=True)
 class DockerProfile:
     """Docker image and container hardening profile."""
 
@@ -179,6 +188,7 @@ class DockerProfile:
         DockerUlimit("nofile", 4096, 4096),
         DockerUlimit("nproc", 512, 512),
     )
+    sysctls: tuple[DockerSysctl, ...] = ()
     cap_drop: tuple[str, ...] = ("ALL",)
     cap_add: tuple[str, ...] = ()
     security_options: tuple[str, ...] = ("no-new-privileges",)

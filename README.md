@@ -442,6 +442,17 @@ deny runtime package installation, direct Python native API calls, and newly
 written Python code execution while keeping Python, Playwright, Chromium, and
 the OpenAI Responses API runtime available.
 
+The `network-socket-control` profile starts from the same runtime hardening as
+`runtime-control`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:network-socket-control` so socket-level network
+controls can be added and measured independently. It enables runtime guards
+that deny Python UDP sockets, deny Python binds to all network interfaces, and
+deny Python connections to common link-local metadata endpoints. It also sets
+Docker's `net.ipv4.ip_unprivileged_port_start` sysctl back to `1024`, expands
+`NO_PROXY` for metadata endpoint names so proxy 403 responses are not mistaken
+for successful metadata access, and maps `metadata.google.internal` to
+`0.0.0.0` alongside the other blocked Docker host shortcut names.
+
 The file protocol for each Docker run is:
 
 ```text

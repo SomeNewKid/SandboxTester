@@ -5,6 +5,7 @@ from __future__ import annotations
 from .models import (
     BrowserSurfaceProfile,
     DockerProfile,
+    DockerSysctl,
     DockerUlimit,
     EnvironmentVariablePolicy,
     LandlockPathRule,
@@ -36,6 +37,10 @@ FILESYSTEM_VISIBILITY_PROFILE_NAME = "filesystem-visibility"
 FILESYSTEM_VISIBILITY_IMAGE_NAME = "sandbox-tester/docker-sandbox:filesystem-visibility"
 RUNTIME_CONTROL_PROFILE_NAME = "runtime-control"
 RUNTIME_CONTROL_IMAGE_NAME = "sandbox-tester/docker-sandbox:runtime-control"
+NETWORK_SOCKET_CONTROL_PROFILE_NAME = "network-socket-control"
+NETWORK_SOCKET_CONTROL_IMAGE_NAME = (
+    "sandbox-tester/docker-sandbox:network-socket-control"
+)
 
 _PROFILES: dict[str, DockerProfile] = {
     BASELINE_PROFILE_NAME: DockerProfile(
@@ -879,6 +884,106 @@ _PROFILES: dict[str, DockerProfile] = {
         ),
         browser_surface=BrowserSurfaceProfile(),
         network_dns_policy=NetworkDnsPolicy(),
+    ),
+    NETWORK_SOCKET_CONTROL_PROFILE_NAME: DockerProfile(
+        name=NETWORK_SOCKET_CONTROL_PROFILE_NAME,
+        description=(
+            "Start from the runtime-control hardening profile so socket-level "
+            "network controls can be added and measured independently."
+        ),
+        image_name=NETWORK_SOCKET_CONTROL_IMAGE_NAME,
+        image_build_arguments=(
+            "--build-arg",
+            "SANDBOX_MINIMIZE_IMAGE=true",
+            "--build-arg",
+            "SANDBOX_REMOVE_PYTHON_PACKAGING=true",
+        ),
+        ipc_mode="private",
+        shm_size="1g",
+        ulimits=(
+            DockerUlimit("nofile", 4096, 4096),
+            DockerUlimit("nproc", 512, 512),
+            DockerUlimit("fsize", 104857600, 104857600),
+        ),
+        sysctls=(DockerSysctl("net.ipv4.ip_unprivileged_port_start", "1024"),),
+        container_run_options=(
+            "--read-only",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev,noexec,size=1g",
+            "--tmpfs",
+            "/sandbox-work:rw,nosuid,nodev,noexec,size=256m",
+            "--tmpfs",
+            "/proc/acpi:rw,nosuid,nodev,noexec,size=1k",
+            "--tmpfs",
+            "/sys/firmware:rw,nosuid,nodev,noexec,size=1k",
+            "--env",
+            "HOME=/tmp/sandbox-home",
+            "--env",
+            "XDG_CACHE_HOME=/tmp/sandbox-cache",
+            "--env",
+            "XDG_CONFIG_HOME=/tmp/sandbox-config",
+            "--env",
+            "XDG_RUNTIME_DIR=/tmp/sandbox-runtime",
+        ),
+        remote_run_root="/sandbox-work",
+        allowed_directory_template="{remote_run_directory}/allowed",
+        denied_directory_template="/sandbox-denied",
+        readonly_denied_mount_target="/sandbox-denied",
+        landlock_rules=(
+            LandlockPathRule("/bin", "rx"),
+            LandlockPathRule("/etc", "r"),
+            LandlockPathRule("/lib", "rx"),
+            LandlockPathRule("/lib64", "rx"),
+            LandlockPathRule("/ms-playwright", "rx"),
+            LandlockPathRule("/opt/sandbox-tester", "rx"),
+            LandlockPathRule("/sbin", "rx"),
+            LandlockPathRule("/usr", "rx"),
+            LandlockPathRule("/var", "r"),
+            LandlockPathRule("/dev", "rw"),
+            LandlockPathRule("/proc", "r"),
+            LandlockPathRule("/sandbox-source", "r"),
+            LandlockPathRule("/sandbox-output", "rw"),
+            LandlockPathRule("/sandbox-work", "rw"),
+            LandlockPathRule("/tmp", "rw"),
+        ),
+        network_gateway=NetworkGatewayProfile(
+            image_name="ubuntu/squid:latest",
+            proxy_host="egress-gateway",
+            proxy_port=3128,
+            allowed_domains=(
+                ".openai.com",
+                ".example.com",
+                ".github.com",
+                ".gov.uk",
+            ),
+            allowed_ip_addresses=(
+                # "1.1.1.1",
+            ),
+            no_proxy_hosts=(
+                "169.254.169.254",
+                "metadata.google.internal",
+            ),
+        ),
+        environment=(
+            EnvironmentVariablePolicy("SSH_AUTH_SOCK", None),
+            EnvironmentVariablePolicy("GPG_AGENT_INFO", None),
+            EnvironmentVariablePolicy("DBUS_SESSION_BUS_ADDRESS", None),
+            EnvironmentVariablePolicy("DISPLAY", None),
+            EnvironmentVariablePolicy("WAYLAND_DISPLAY", None),
+            EnvironmentVariablePolicy("GNUPGHOME", "/tmp/sandbox-gnupg-empty"),
+            EnvironmentVariablePolicy("SANDBOX_DENY_UDP", "1"),
+            EnvironmentVariablePolicy("SANDBOX_DENY_METADATA_ENDPOINTS", "1"),
+            EnvironmentVariablePolicy("SANDBOX_DENY_ALL_INTERFACE_BIND", "1"),
+        ),
+        browser_surface=BrowserSurfaceProfile(),
+        network_dns_policy=NetworkDnsPolicy(
+            blocked_hostnames=(
+                "host.docker.internal",
+                "gateway.docker.internal",
+                "kubernetes.docker.internal",
+                "metadata.google.internal",
+            )
+        ),
     ),
 }
 

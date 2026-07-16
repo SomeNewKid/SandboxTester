@@ -5,7 +5,9 @@ from __future__ import annotations
 import importlib.abc
 import importlib.util
 import inspect
+import ipaddress
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -27,6 +29,21 @@ _DENIED_CODE_ROOTS = tuple(
         "/tmp",
     )
 )
+_DENIED_METADATA_HOSTS = frozenset(
+    {
+        "169.254.169.254",
+        "metadata.google.internal",
+    }
+)
+_DENIED_METADATA_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in (
+        "169.254.0.0/16",
+        "fe80::/10",
+    )
+)
+_ORIGINAL_SOCKET_CLASS = socket.socket
+_ORIGINAL_CREATE_CONNECTION = socket.create_connection
 _ORIGINAL_SPEC_FROM_FILE_LOCATION = importlib.util.spec_from_file_location
 
 
@@ -89,6 +106,96 @@ def _deny_writable_spec_from_file_location() -> None:
     importlib.util.spec_from_file_location = guarded_spec_from_file_location
 
 
+def _apply_socket_guards() -> None:
+    if not _socket_guards_enabled():
+        return
+
+    class _GuardedSocket(_ORIGINAL_SOCKET_CLASS):
+        def __init__(self, family=-1, type=-1, proto=-1, fileno=None):  # type: ignore[no-untyped-def]
+            if _udp_denied() and _is_udp_socket(family, type):
+                raise PermissionError("UDP sockets are denied by sandbox profile")
+
+            super().__init__(family, type, proto, fileno)
+
+        def bind(self, address):  # type: ignore[no-untyped-def]
+            if _all_interface_bind_denied() and _is_all_interface_bind(address):
+                raise PermissionError(
+                    "All-interface binds are denied by sandbox profile"
+                )
+
+            return super().bind(address)
+
+        def connect(self, address):  # type: ignore[no-untyped-def]
+            _raise_if_metadata_address(address)
+            return super().connect(address)
+
+        def connect_ex(self, address):  # type: ignore[no-untyped-def]
+            _raise_if_metadata_address(address)
+            return super().connect_ex(address)
+
+    def guarded_create_connection(address, *args, **kwargs):  # type: ignore[no-untyped-def]
+        _raise_if_metadata_address(address)
+        return _ORIGINAL_CREATE_CONNECTION(address, *args, **kwargs)
+
+    socket.socket = _GuardedSocket
+    socket.create_connection = guarded_create_connection
+
+
+def _socket_guards_enabled() -> bool:
+    return _udp_denied() or _all_interface_bind_denied() or _metadata_denied()
+
+
+def _udp_denied() -> bool:
+    return _enabled("SANDBOX_DENY_UDP")
+
+
+def _all_interface_bind_denied() -> bool:
+    return _enabled("SANDBOX_DENY_ALL_INTERFACE_BIND")
+
+
+def _metadata_denied() -> bool:
+    return _enabled("SANDBOX_DENY_METADATA_ENDPOINTS")
+
+
+def _enabled(name: str) -> bool:
+    return os.environ.get(name, "").lower() in {"1", "true", "yes"}
+
+
+def _is_udp_socket(family: int, socket_type: int) -> bool:
+    if socket_type & socket.SOCK_DGRAM != socket.SOCK_DGRAM:
+        return False
+
+    return family in {socket.AF_INET, socket.AF_INET6, -1}
+
+
+def _is_all_interface_bind(address: object) -> bool:
+    if not isinstance(address, tuple) or not address:
+        return False
+
+    host = address[0]
+    return host in {"", "0.0.0.0", "::"}
+
+
+def _raise_if_metadata_address(address: object) -> None:
+    if not _metadata_denied():
+        return
+
+    if not isinstance(address, tuple) or not address:
+        return
+
+    host = str(address[0]).strip("[]").lower()
+    if host in _DENIED_METADATA_HOSTS:
+        raise PermissionError("Metadata endpoint access is denied by sandbox profile")
+
+    try:
+        ip_address = ipaddress.ip_address(host)
+    except ValueError:
+        return
+
+    if any(ip_address in network for network in _DENIED_METADATA_NETWORKS):
+        raise PermissionError("Metadata endpoint access is denied by sandbox profile")
+
+
 def _get_script_path() -> Path | None:
     if not sys.argv:
         return None
@@ -141,5 +248,6 @@ def _is_landlock_bootstrap_import(module_name: str) -> bool:
 
 _deny_writable_script_execution()
 _deny_writable_spec_from_file_location()
+_apply_socket_guards()
 sys.meta_path.insert(0, _DeniedWritableCodeFinder())
 sys.meta_path.insert(0, _DeniedModuleFinder())

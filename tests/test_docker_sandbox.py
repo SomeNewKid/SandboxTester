@@ -27,6 +27,7 @@ from docker_sandbox.profiles import (
     FILESYSTEM_VISIBILITY_IMAGE_NAME,
     MINIMIZED_IMAGE_IMAGE_NAME,
     NETWORK_EGRESS_IMAGE_NAME,
+    NETWORK_SOCKET_CONTROL_IMAGE_NAME,
     READONLY_FS_IMAGE_NAME,
     RESOURCE_LIMITS_IMAGE_NAME,
     RUNTIME_CONTROL_IMAGE_NAME,
@@ -154,6 +155,10 @@ def test_runtime_sitecustomize_denies_modules_and_writable_code() -> None:
     assert '"pip"' in sitecustomize_text
     assert '"setuptools"' in sitecustomize_text
     assert '"wheel"' in sitecustomize_text
+    assert "SANDBOX_DENY_UDP" in sitecustomize_text
+    assert "SANDBOX_DENY_METADATA_ENDPOINTS" in sitecustomize_text
+    assert "SANDBOX_DENY_ALL_INTERFACE_BIND" in sitecustomize_text
+    assert "_apply_socket_guards()" in sitecustomize_text
     assert '"/sandbox-work"' in sitecustomize_text
     assert '"/sandbox-output"' in sitecustomize_text
     assert '"/tmp"' in sitecustomize_text
@@ -1159,6 +1164,50 @@ def test_runtime_control_profile_removes_python_packaging_modules(
         "SANDBOX_REMOVE_PYTHON_PACKAGING=true",
         str(tmp_path),
     ]
+
+
+def test_network_socket_control_profile_adds_socket_guards(
+    tmp_path: Path,
+) -> None:
+    """Verify network-socket-control adds socket hardening to runtime-control."""
+    runtime_profile = get_docker_profile("runtime-control")
+    network_socket_profile = get_docker_profile("network-socket-control")
+    configuration = _create_configuration(tmp_path, network_socket_profile)
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=tmp_path / ".docker_sandbox" / "runs" / "run-test",
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+
+    assert network_socket_profile.image_name == NETWORK_SOCKET_CONTROL_IMAGE_NAME
+    assert network_socket_profile.image_name != runtime_profile.image_name
+    assert network_socket_profile.image_build_arguments == (
+        "--build-arg",
+        "SANDBOX_MINIMIZE_IMAGE=true",
+        "--build-arg",
+        "SANDBOX_REMOVE_PYTHON_PACKAGING=true",
+    )
+    assert network_socket_profile.container_run_options == (
+        runtime_profile.container_run_options
+    )
+    assert network_socket_profile.landlock_rules == runtime_profile.landlock_rules
+    assert network_socket_profile.denied_executable_paths == (
+        runtime_profile.denied_executable_paths
+    )
+    assert "--sysctl" in command
+    assert "net.ipv4.ip_unprivileged_port_start=1024" in command
+    assert "SANDBOX_DENY_UDP=1" in command
+    assert "SANDBOX_DENY_METADATA_ENDPOINTS=1" in command
+    assert "SANDBOX_DENY_ALL_INTERFACE_BIND=1" in command
+    assert (
+        "NO_PROXY=localhost,127.0.0.1,169.254.169.254,metadata.google.internal"
+        in command
+    )
+    assert "metadata.google.internal:0.0.0.0" in command
 
 
 def test_denied_executable_stubs_are_temporary_run_scaffolding(
