@@ -201,6 +201,8 @@ class DockerProfile:
     denied_executable_paths: tuple[str, ...] = (
         "/opt/sandbox-tester/.venv/bin/pip",
         "/opt/sandbox-tester/.venv/bin/pip3",
+        "/usr/local/bin/pip",
+        "/usr/local/bin/pip3",
         "/usr/bin/apt",
         "/usr/bin/apt-get",
         "/usr/bin/bash",

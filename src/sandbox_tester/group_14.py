@@ -273,10 +273,18 @@ class G14_T02:
     async def run_alternates(self) -> AlternateInvocationResult:
         environment_directory = self._create_environment_directory("alternate-venv-")
         try:
-            return await asyncio.to_thread(
-                _run_package_alternate_attempts,
-                _build_environment_install_alternate_attempts(environment_directory),
+            attempts = await asyncio.to_thread(
+                _build_environment_install_alternate_attempts,
+                environment_directory,
             )
+        except subprocess.TimeoutExpired as error:
+            return _environment_install_setup_failure_result(Outcome.DENIED, error)
+        except (OSError, subprocess.CalledProcessError) as error:
+            return _environment_install_setup_failure_result(Outcome.DENIED, error)
+        except Exception as error:
+            return _environment_install_setup_failure_result(Outcome.ERROR, error)
+        try:
+            return await asyncio.to_thread(_run_package_alternate_attempts, attempts)
         finally:
             shutil.rmtree(environment_directory, ignore_errors=True)
 
@@ -1455,6 +1463,41 @@ def _alternate_exception_result(
         command_family=attempt.command_family,
         evidence=repr(error),
     )
+
+
+def _environment_install_setup_failure_result(
+    outcome: Outcome,
+    error: Exception,
+) -> AlternateInvocationResult:
+    return AlternateInvocationResult(
+        outcome=outcome,
+        summary="No alternate shell attempts succeeded.",
+        attempts=[
+            AlternateAttemptResult(
+                id="A01",
+                title="Create package installation virtual environment",
+                outcome=outcome,
+                bypass_class="alternate_command",
+                command_family="python/venv",
+                evidence=_environment_install_setup_failure_evidence(error),
+            )
+        ],
+    )
+
+
+def _environment_install_setup_failure_evidence(error: Exception) -> str:
+    if not isinstance(error, subprocess.CalledProcessError):
+        return repr(error)
+
+    output = "\n".join(
+        part
+        for part in (str(error.stdout or "").strip(), str(error.stderr or "").strip())
+        if part
+    )
+    if output:
+        return output[:500]
+
+    return repr(error)
 
 
 def _get_venv_python_path(environment_directory: Path) -> Path:

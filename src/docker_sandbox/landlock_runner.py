@@ -6,6 +6,7 @@ import argparse
 import ctypes
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -81,8 +82,11 @@ def main(arguments: list[str] | None = None) -> int:
     parsed_arguments = _parse_arguments(arguments)
     rules = _read_policy(parsed_arguments.policy)
     _apply_landlock_rules(rules)
+    _drop_bootstrap_ctypes_modules()
 
     from sandbox_tester.cli import main as sandbox_tester_main
+
+    _disable_runtime_ctypes_access()
 
     sandbox_arguments = ["--config", str(parsed_arguments.config)]
     if parsed_arguments.verbose:
@@ -91,6 +95,40 @@ def main(arguments: list[str] | None = None) -> int:
         sandbox_arguments.append("--serialize-evidence")
 
     return sandbox_tester_main(sandbox_arguments)
+
+
+def _drop_bootstrap_ctypes_modules() -> None:
+    globals().pop("ctypes", None)
+    sys.modules.pop("ctypes", None)
+    sys.modules.pop("_ctypes", None)
+
+
+def _disable_runtime_ctypes_access() -> None:
+    ctypes_module = sys.modules.get("ctypes")
+    if ctypes_module is None:
+        return
+
+    denied_loader = _build_denied_ctypes_loader()
+    for name in ("CDLL", "PyDLL", "WinDLL", "OleDLL"):
+        if hasattr(ctypes_module, name):
+            setattr(ctypes_module, name, denied_loader)
+
+    denied_library = _DeniedCtypesLibrary()
+    for name in ("cdll", "pydll", "windll", "oledll"):
+        if hasattr(ctypes_module, name):
+            setattr(ctypes_module, name, denied_library)
+
+
+class _DeniedCtypesLibrary:
+    def __getattr__(self, name: str) -> object:
+        raise ModuleNotFoundError("'ctypes' is denied by sandbox profile")
+
+
+def _build_denied_ctypes_loader() -> object:
+    def _denied_ctypes_loader(*args: object, **kwargs: object) -> object:
+        raise ModuleNotFoundError("'ctypes' is denied by sandbox profile")
+
+    return _denied_ctypes_loader
 
 
 def _parse_arguments(arguments: list[str] | None) -> argparse.Namespace:

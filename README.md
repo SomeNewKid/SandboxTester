@@ -423,6 +423,25 @@ Landlock read access to `/sys`, keeps `/dev` available for Python and Chromium
 compatibility, and adds a process file-size ulimit as a coarse output growth
 guard.
 
+The `runtime-control` profile starts from the same runtime hardening as
+`filesystem-visibility`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:runtime-control` so Python runtime controls can
+be added and measured independently. Its first image policy passes the
+Dockerfile build argument `SANDBOX_REMOVE_PYTHON_PACKAGING=true`, which removes
+`pip`, `setuptools`, `wheel`, and their package metadata from the virtualenv
+and global Python paths after the image's Python dependencies have already been
+installed. It also removes related packaging support such as `ensurepip`,
+`pkg_resources`, setuptools' `_distutils_hack`, and global packaging command
+entry points. It writes a small `sitecustomize.py` guard that denies imports of
+`pip`, `ensurepip`, `setuptools`, and `wheel`, so `python -m pip` fails even if
+packaging files are accidentally reintroduced. The same guard denies
+`ctypes` imports to block direct native operating-system API calls from Python,
+and denies Python script execution and module imports from writable data paths
+such as `/sandbox-work`, `/sandbox-output`, and `/tmp`. This is intended to
+deny runtime package installation, direct Python native API calls, and newly
+written Python code execution while keeping Python, Playwright, Chromium, and
+the OpenAI Responses API runtime available.
+
 The file protocol for each Docker run is:
 
 ```text

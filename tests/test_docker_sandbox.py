@@ -29,6 +29,7 @@ from docker_sandbox.profiles import (
     NETWORK_EGRESS_IMAGE_NAME,
     READONLY_FS_IMAGE_NAME,
     RESOURCE_LIMITS_IMAGE_NAME,
+    RUNTIME_CONTROL_IMAGE_NAME,
     SYSCALL_CONTROL_IMAGE_NAME,
     get_docker_profile,
 )
@@ -117,12 +118,68 @@ def test_dockerfile_installs_dependencies_without_copying_source() -> None:
 
     assert "ARG SANDBOX_MINIMIZE_IMAGE=false" in dockerfile_text
     assert "SANDBOX_MINIMIZE_IMAGE" in dockerfile_text
+    assert "ARG SANDBOX_REMOVE_PYTHON_PACKAGING=false" in dockerfile_text
+    assert "SANDBOX_REMOVE_PYTHON_PACKAGING" in dockerfile_text
+    assert "runtime_sitecustomize.py" in dockerfile_text
+    assert "sitecustomize.py" in dockerfile_text
+    assert "/usr/local/bin/pip" in dockerfile_text
+    assert "/usr/local/lib" in dockerfile_text
+    assert "ensurepip" in dockerfile_text
+    assert "pkg_resources" in dockerfile_text
+    assert "_distutils_hack" in dockerfile_text
+    assert "distutils-precedence.pth" in dockerfile_text
     assert "apt-get purge --yes --auto-remove" in dockerfile_text
     assert "/usr/bin/apt-get" in dockerfile_text
     assert "COPY src" not in dockerfile_text
     assert "pip install --no-cache-dir -e ." not in dockerfile_text
     assert "pip install --no-cache-dir openai paramiko pillow playwright pymysql" in (
         dockerfile_text
+    )
+
+
+def test_runtime_sitecustomize_denies_modules_and_writable_code() -> None:
+    """Verify runtime-control installs Python runtime import guards."""
+    sitecustomize_text = Path(
+        "src/docker_sandbox/dockerfile/runtime_sitecustomize.py"
+    ).read_text(encoding="utf-8")
+
+    assert "_DeniedModuleFinder" in sitecustomize_text
+    assert "_DeniedWritableCodeFinder" in sitecustomize_text
+    assert "_deny_writable_spec_from_file_location()" in sitecustomize_text
+    assert "_ORIGINAL_SPEC_FROM_FILE_LOCATION" in sitecustomize_text
+    assert "_is_landlock_bootstrap_import" in sitecustomize_text
+    assert '"_ctypes"' in sitecustomize_text
+    assert '"ctypes"' in sitecustomize_text
+    assert '"ensurepip"' in sitecustomize_text
+    assert '"pip"' in sitecustomize_text
+    assert '"setuptools"' in sitecustomize_text
+    assert '"wheel"' in sitecustomize_text
+    assert '"/sandbox-work"' in sitecustomize_text
+    assert '"/sandbox-output"' in sitecustomize_text
+    assert '"/tmp"' in sitecustomize_text
+    assert "_deny_writable_script_execution()" in sitecustomize_text
+
+
+def test_landlock_runner_drops_bootstrap_ctypes_before_sandbox_tester() -> None:
+    """Verify ctypes bootstrap access is disabled before probes run."""
+    runner_text = Path("src/docker_sandbox/landlock_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "_drop_bootstrap_ctypes_modules()" in runner_text
+    assert "_disable_runtime_ctypes_access()" in runner_text
+    assert "_DeniedCtypesLibrary" in runner_text
+    assert '"CDLL"' in runner_text
+    assert 'sys.modules.pop("ctypes", None)' in runner_text
+    assert 'sys.modules.pop("_ctypes", None)' in runner_text
+    assert runner_text.index("_drop_bootstrap_ctypes_modules()") < runner_text.index(
+        "from sandbox_tester.cli import main as sandbox_tester_main"
+    )
+    assert runner_text.index(
+        "from sandbox_tester.cli import main as sandbox_tester_main"
+    ) < runner_text.index("_disable_runtime_ctypes_access()")
+    assert runner_text.index("_disable_runtime_ctypes_access()") < runner_text.index(
+        "return sandbox_tester_main(sandbox_arguments)"
     )
 
 
@@ -1018,6 +1075,90 @@ def test_filesystem_visibility_profile_reduces_runtime_surface(
     assert "fsize=104857600:104857600" in command
     assert LandlockPathRule("/sys", "r") not in profile.landlock_rules
     assert LandlockPathRule("/dev", "rw") in profile.landlock_rules
+
+
+def test_runtime_control_profile_starts_from_filesystem_visibility_profile() -> None:
+    """Verify runtime-control begins as a filesystem-visibility clone."""
+    filesystem_profile = get_docker_profile("filesystem-visibility")
+    runtime_profile = get_docker_profile("runtime-control")
+
+    assert runtime_profile.image_name == RUNTIME_CONTROL_IMAGE_NAME
+    assert runtime_profile.image_name != filesystem_profile.image_name
+    assert runtime_profile.image_build_arguments == (
+        "--build-arg",
+        "SANDBOX_MINIMIZE_IMAGE=true",
+        "--build-arg",
+        "SANDBOX_REMOVE_PYTHON_PACKAGING=true",
+    )
+    assert runtime_profile.ipc_mode == filesystem_profile.ipc_mode
+    assert runtime_profile.shm_size == filesystem_profile.shm_size
+    assert runtime_profile.cgroupns_mode == filesystem_profile.cgroupns_mode
+    assert runtime_profile.pids_limit == filesystem_profile.pids_limit
+    assert runtime_profile.memory == filesystem_profile.memory
+    assert runtime_profile.memory_swap == filesystem_profile.memory_swap
+    assert runtime_profile.cpus == filesystem_profile.cpus
+    assert runtime_profile.ulimits == filesystem_profile.ulimits
+    assert runtime_profile.cap_drop == filesystem_profile.cap_drop
+    assert runtime_profile.cap_add == filesystem_profile.cap_add
+    assert runtime_profile.security_options == filesystem_profile.security_options
+    assert runtime_profile.seccomp_profile == filesystem_profile.seccomp_profile
+    assert runtime_profile.container_run_options == (
+        filesystem_profile.container_run_options
+    )
+    assert runtime_profile.remote_run_root == filesystem_profile.remote_run_root
+    assert (
+        runtime_profile.allowed_directory_template
+        == filesystem_profile.allowed_directory_template
+    )
+    assert (
+        runtime_profile.denied_directory_template
+        == filesystem_profile.denied_directory_template
+    )
+    assert (
+        runtime_profile.readonly_denied_mount_target
+        == filesystem_profile.readonly_denied_mount_target
+    )
+    assert runtime_profile.landlock_rules == filesystem_profile.landlock_rules
+    assert runtime_profile.network_gateway == filesystem_profile.network_gateway
+    assert runtime_profile.network_dns_policy == filesystem_profile.network_dns_policy
+    assert runtime_profile.socket_mounts == filesystem_profile.socket_mounts
+    assert runtime_profile.ssh_agent_socket == filesystem_profile.ssh_agent_socket
+    assert runtime_profile.gpg_agent_socket == filesystem_profile.gpg_agent_socket
+    assert runtime_profile.browser_debugging == filesystem_profile.browser_debugging
+    assert runtime_profile.browser_surface == filesystem_profile.browser_surface
+    assert runtime_profile.environment == filesystem_profile.environment
+    assert runtime_profile.denied_executables == filesystem_profile.denied_executables
+    assert (
+        runtime_profile.denied_executable_paths
+        == filesystem_profile.denied_executable_paths
+    )
+    assert "/usr/local/bin/pip" in runtime_profile.denied_executable_paths
+    assert "/usr/local/bin/pip3" in runtime_profile.denied_executable_paths
+
+
+def test_runtime_control_profile_removes_python_packaging_modules(
+    tmp_path: Path,
+) -> None:
+    """Verify runtime-control passes Python packaging hardening build flags."""
+    configuration = _create_configuration(
+        tmp_path, get_docker_profile("runtime-control")
+    )
+
+    command = _build_image_command(configuration)
+
+    assert command == [
+        "docker",
+        "build",
+        "--file",
+        str(tmp_path / "Dockerfile"),
+        "--tag",
+        RUNTIME_CONTROL_IMAGE_NAME,
+        "--build-arg",
+        "SANDBOX_MINIMIZE_IMAGE=true",
+        "--build-arg",
+        "SANDBOX_REMOVE_PYTHON_PACKAGING=true",
+        str(tmp_path),
+    ]
 
 
 def test_denied_executable_stubs_are_temporary_run_scaffolding(

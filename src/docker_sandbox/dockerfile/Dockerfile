@@ -1,6 +1,7 @@
 FROM mcr.microsoft.com/playwright/python:v1.61.0-noble
 
 ARG SANDBOX_MINIMIZE_IMAGE=false
+ARG SANDBOX_REMOVE_PYTHON_PACKAGING=false
 
 WORKDIR /opt/sandbox-tester
 
@@ -15,6 +16,7 @@ RUN python -m venv /opt/sandbox-tester/.venv
 ENV PATH="/opt/sandbox-tester/.venv/bin:${PATH}"
 
 COPY pyproject.toml README.md ./
+COPY ["src/docker_sandbox/dockerfile/runtime_sitecustomize.py", "/tmp/runtime_sitecustomize.py"]
 
 RUN pip install --no-cache-dir openai paramiko pillow playwright pymysql
 
@@ -63,4 +65,21 @@ RUN if [ "${SANDBOX_MINIMIZE_IMAGE}" = "true" ]; then \
             /usr/bin/unshare \
             /usr/sbin/service; \
         rm -rf /var/lib/apt/lists/* /var/cache/apt/*; \
+    fi
+
+RUN if [ "${SANDBOX_REMOVE_PYTHON_PACKAGING}" = "true" ]; then \
+        python -c "import pathlib, shutil, sysconfig; paths = {pathlib.Path(sysconfig.get_path(name)) for name in ('purelib', 'platlib', 'stdlib')}; paths.update(path for root in (pathlib.Path('/usr/local/lib'), pathlib.Path('/usr/lib')) if root.exists() for pattern in ('python*/dist-packages', 'python*/site-packages', 'python*/ensurepip') for path in root.glob(pattern)); names = ('_distutils_hack', 'ensurepip', 'pip', 'pkg_resources', 'setuptools', 'wheel'); patterns = [*names, *(f'{name}-*.dist-info' for name in names), *(f'{name}-*.egg-info' for name in names), 'distutils-precedence.pth']; [shutil.rmtree(match, ignore_errors=True) if match.is_dir() else match.unlink(missing_ok=True) for path in paths for pattern in patterns for match in path.glob(pattern)]; [shutil.copyfile('/tmp/runtime_sitecustomize.py', path / 'sitecustomize.py') for path in paths if path.exists() and path.name != 'ensurepip']" \
+        && rm -f \
+            /opt/sandbox-tester/.venv/bin/pip \
+            /opt/sandbox-tester/.venv/bin/pip3 \
+            /opt/sandbox-tester/.venv/bin/pip3.* \
+            /opt/sandbox-tester/.venv/bin/wheel \
+            /usr/local/bin/pip \
+            /usr/local/bin/pip3 \
+            /usr/local/bin/pip3.* \
+            /usr/local/bin/wheel \
+            /usr/bin/pip \
+            /usr/bin/pip3 \
+            /usr/bin/pip3.* \
+            /usr/bin/wheel; \
     fi
