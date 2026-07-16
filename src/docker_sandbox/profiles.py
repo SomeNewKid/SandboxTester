@@ -49,6 +49,10 @@ DESKTOP_CHANNEL_CONTROL_IMAGE_NAME = (
 )
 SYSTEM_CONFIG_CONTROL_PROFILE_NAME = "system-config-control"
 SYSTEM_CONFIG_CONTROL_IMAGE_NAME = "sandbox-tester/docker-sandbox:system-config-control"
+HARDWARE_DEVICE_CONTROL_PROFILE_NAME = "hardware-device-control"
+HARDWARE_DEVICE_CONTROL_IMAGE_NAME = (
+    "sandbox-tester/docker-sandbox:hardware-device-control"
+)
 
 _PROFILES: dict[str, DockerProfile] = {
     BASELINE_PROFILE_NAME: DockerProfile(
@@ -1036,6 +1040,21 @@ _PROFILES[SYSTEM_CONFIG_CONTROL_PROFILE_NAME] = replace(
     readonly_startup_item_directories=(
         "/tmp/sandbox-home/.config/autostart",
         "/tmp/sandbox-config/autostart",
+    ),
+)
+
+_PROFILES[HARDWARE_DEVICE_CONTROL_PROFILE_NAME] = replace(
+    _PROFILES[SYSTEM_CONFIG_CONTROL_PROFILE_NAME],
+    name=HARDWARE_DEVICE_CONTROL_PROFILE_NAME,
+    description=(
+        "Start from the system-config-control hardening profile so hardware "
+        "and peripheral device enumeration controls can be added and measured "
+        "independently."
+    ),
+    image_name=HARDWARE_DEVICE_CONTROL_IMAGE_NAME,
+    environment=(
+        *_PROFILES[SYSTEM_CONFIG_CONTROL_PROFILE_NAME].environment,
+        EnvironmentVariablePolicy("SANDBOX_DENY_HARDWARE_DEVICE_ENUMERATION", "1"),
     ),
 )
 

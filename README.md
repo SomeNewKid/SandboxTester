@@ -475,6 +475,16 @@ directories as read-only, so startup-item probes cannot create autostart
 entries while the broader temporary home and config directories remain
 available for Python, Playwright, and Chromium.
 
+The `hardware-device-control` profile starts from the same runtime hardening as
+`system-config-control`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:hardware-device-control` so hardware and
+peripheral visibility controls can be added and measured independently. It
+enables a runtime guard that denies camera, microphone, printer, USB, serial,
+and Bluetooth enumeration paths used by the Sandbox Tester probes, while
+leaving GPU detail probing available for separate measurement. This keeps the
+normal Python, Playwright, Chromium, and OpenAI API workload available without
+advertising most host peripheral surfaces to the agent.
+
 The file protocol for each Docker run is:
 
 ```text

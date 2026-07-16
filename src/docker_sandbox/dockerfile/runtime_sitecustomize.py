@@ -8,6 +8,7 @@ import inspect
 import ipaddress
 import os
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,6 +46,26 @@ _DENIED_METADATA_NETWORKS = tuple(
 _ORIGINAL_SOCKET_CLASS = socket.socket
 _ORIGINAL_CREATE_CONNECTION = socket.create_connection
 _ORIGINAL_SPEC_FROM_FILE_LOCATION = importlib.util.spec_from_file_location
+_ORIGINAL_SUBPROCESS_RUN = subprocess.run
+_ORIGINAL_PATH_EXISTS = Path.exists
+_ORIGINAL_PATH_GLOB = Path.glob
+_ORIGINAL_PATH_ITERDIR = Path.iterdir
+_DENIED_HARDWARE_COMMAND_MARKERS = frozenset(
+    {
+        "/dev/snd",
+        "/sys/bus/usb",
+        "/sys/class/bluetooth",
+        "arecord",
+        "bluetoothctl",
+        "lpstat",
+        "lsusb",
+        "ttyACM",
+        "ttyS",
+        "ttyUSB",
+        "video*",
+        "video4linux2",
+    }
+)
 
 
 class _DeniedModuleFinder(importlib.abc.MetaPathFinder):
@@ -161,6 +182,94 @@ def _enabled(name: str) -> bool:
     return os.environ.get(name, "").lower() in {"1", "true", "yes"}
 
 
+def _apply_hardware_device_guards() -> None:
+    if not _hardware_device_enumeration_denied():
+        return
+
+    def guarded_subprocess_run(args, *run_args, **run_kwargs):  # type: ignore[no-untyped-def]
+        if _is_denied_hardware_command(args):
+            raise PermissionError(
+                "Hardware device enumeration is denied by sandbox profile"
+            )
+
+        return _ORIGINAL_SUBPROCESS_RUN(args, *run_args, **run_kwargs)
+
+    def guarded_path_exists(self: Path) -> bool:
+        if _is_denied_hardware_path(self):
+            raise PermissionError(
+                "Hardware device enumeration is denied by sandbox profile"
+            )
+
+        return _ORIGINAL_PATH_EXISTS(self)
+
+    def guarded_path_glob(self: Path, pattern: str):  # type: ignore[no-untyped-def]
+        if _is_denied_hardware_glob(self, pattern):
+            raise PermissionError(
+                "Hardware device enumeration is denied by sandbox profile"
+            )
+
+        return _ORIGINAL_PATH_GLOB(self, pattern)
+
+    def guarded_path_iterdir(self: Path):  # type: ignore[no-untyped-def]
+        if _is_denied_hardware_path(self):
+            raise PermissionError(
+                "Hardware device enumeration is denied by sandbox profile"
+            )
+
+        return _ORIGINAL_PATH_ITERDIR(self)
+
+    subprocess.run = guarded_subprocess_run
+    Path.exists = guarded_path_exists  # type: ignore[method-assign]
+    Path.glob = guarded_path_glob  # type: ignore[method-assign]
+    Path.iterdir = guarded_path_iterdir  # type: ignore[method-assign]
+
+
+def _hardware_device_enumeration_denied() -> bool:
+    return _enabled("SANDBOX_DENY_HARDWARE_DEVICE_ENUMERATION")
+
+
+def _is_denied_hardware_command(args: object) -> bool:
+    text = _command_text(args)
+    if not text:
+        return False
+
+    return any(marker in text for marker in _DENIED_HARDWARE_COMMAND_MARKERS)
+
+
+def _command_text(args: object) -> str:
+    if isinstance(args, (str, bytes, os.PathLike)):
+        return os.fsdecode(args)
+
+    if not isinstance(args, (list, tuple)):
+        return ""
+
+    return " ".join(os.fsdecode(item) for item in args)
+
+
+def _is_denied_hardware_path(path: object) -> bool:
+    path_text = _path_text(path)
+    if path_text is None:
+        return False
+
+    return path_text in {"/dev/snd", "/sys/bus/usb", "/sys/class/bluetooth"}
+
+
+def _is_denied_hardware_glob(path: object, pattern: object) -> bool:
+    path_text = _path_text(path)
+    pattern_text = _path_text(pattern)
+    if path_text != "/dev":
+        return False
+
+    return pattern_text in {"video*", "ttyS*", "ttyUSB*", "ttyACM*"}
+
+
+def _path_text(path: object) -> str | None:
+    if not isinstance(path, (str, bytes, os.PathLike)):
+        return None
+
+    return os.fsdecode(path)
+
+
 def _is_udp_socket(family: int, socket_type: int) -> bool:
     if socket_type & socket.SOCK_DGRAM != socket.SOCK_DGRAM:
         return False
@@ -249,5 +358,6 @@ def _is_landlock_bootstrap_import(module_name: str) -> bool:
 _deny_writable_script_execution()
 _deny_writable_spec_from_file_location()
 _apply_socket_guards()
+_apply_hardware_device_guards()
 sys.meta_path.insert(0, _DeniedWritableCodeFinder())
 sys.meta_path.insert(0, _DeniedModuleFinder())

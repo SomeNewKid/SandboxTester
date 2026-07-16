@@ -26,6 +26,7 @@ from docker_sandbox.profiles import (
     DNS_PROXY_CONTROL_IMAGE_NAME,
     EXECUTION_CONTROL_IMAGE_NAME,
     FILESYSTEM_VISIBILITY_IMAGE_NAME,
+    HARDWARE_DEVICE_CONTROL_IMAGE_NAME,
     MINIMIZED_IMAGE_IMAGE_NAME,
     NETWORK_EGRESS_IMAGE_NAME,
     NETWORK_SOCKET_CONTROL_IMAGE_NAME,
@@ -166,7 +167,11 @@ def test_runtime_sitecustomize_denies_modules_and_writable_code() -> None:
     assert "SANDBOX_DENY_UDP" in sitecustomize_text
     assert "SANDBOX_DENY_METADATA_ENDPOINTS" in sitecustomize_text
     assert "SANDBOX_DENY_ALL_INTERFACE_BIND" in sitecustomize_text
+    assert "SANDBOX_DENY_HARDWARE_DEVICE_ENUMERATION" in sitecustomize_text
     assert "_apply_socket_guards()" in sitecustomize_text
+    assert "_apply_hardware_device_guards()" in sitecustomize_text
+    assert "/sys/bus/usb" in sitecustomize_text
+    assert "/sys/class/bluetooth" in sitecustomize_text
     assert '"/sandbox-work"' in sitecustomize_text
     assert '"/sandbox-output"' in sitecustomize_text
     assert '"/tmp"' in sitecustomize_text
@@ -1322,6 +1327,35 @@ def test_system_config_control_profile_adds_package_and_startup_guards(
     )
     assert "target=/tmp/sandbox-home/.config/autostart,readonly" in " ".join(command)
     assert "target=/tmp/sandbox-config/autostart,readonly" in " ".join(command)
+
+
+def test_hardware_device_control_profile_adds_device_enumeration_guard(
+    tmp_path: Path,
+) -> None:
+    """Verify hardware-device-control adds hardware enumeration guards."""
+    system_profile = get_docker_profile("system-config-control")
+    hardware_profile = get_docker_profile("hardware-device-control")
+    configuration = _create_configuration(tmp_path, hardware_profile)
+    run_directory = tmp_path / ".docker_sandbox" / "runs" / "run-test"
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=run_directory,
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+
+    assert hardware_profile.image_name == HARDWARE_DEVICE_CONTROL_IMAGE_NAME
+    assert hardware_profile.image_name != system_profile.image_name
+    assert (
+        hardware_profile.image_build_arguments == system_profile.image_build_arguments
+    )
+    assert hardware_profile.readonly_startup_item_directories == (
+        system_profile.readonly_startup_item_directories
+    )
+    assert "SANDBOX_DENY_HARDWARE_DEVICE_ENUMERATION=1" in command
 
 
 def test_denied_executable_stubs_are_temporary_run_scaffolding(
