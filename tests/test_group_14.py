@@ -3,7 +3,7 @@
 import asyncio
 import subprocess
 
-from sandbox_tester.group_14 import G14_T02
+from sandbox_tester.group_14 import G14_T02, G14_T07
 from sandbox_tester.models import Outcome
 from sandbox_tester.testing import CapabilityContext, OperatingSystem
 
@@ -43,3 +43,27 @@ def test_g14_t02_alternates_report_venv_setup_failure(
     assert result.attempts[0].outcome == Outcome.DENIED
     assert result.attempts[0].command_family == "python/venv"
     assert "ensurepip is not available" in result.attempts[0].evidence
+
+
+def test_g14_t07_missing_process_spawn_returns_no_pip_config_paths(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Verify denied pip config subprocess probing does not abort the run."""
+    context = CapabilityContext(
+        working_directory=tmp_path,
+        allowed_directory=tmp_path,
+        denied_directory=tmp_path / "denied",
+        runtime_user_directory=tmp_path,
+        runtime_temp_directory=tmp_path,
+        mounted_shared_directory=None,
+        operating_system=OperatingSystem.LINUX,
+    )
+    capability = G14_T07(context)
+
+    def deny_process_spawn(*args, **kwargs):
+        raise PermissionError("Process spawning is denied by sandbox profile")
+
+    monkeypatch.setattr("sandbox_tester.group_14.subprocess.run", deny_process_spawn)
+
+    assert capability._get_pip_config_paths() == []

@@ -494,6 +494,16 @@ under the temporary home and XDG config trees. This prevents probes from
 creating user service unit files while preserving the broader writable config
 space needed by Python, Playwright, and Chromium.
 
+The `no-shell-access` profile starts from the same runtime hardening as
+`persistence-control`, but uses the separate image tag
+`sandbox-tester/docker-sandbox:no-shell-access` so Python process and shell
+spawning can be denied as a final hardening layer. It enables a runtime guard
+that blocks common process-launch APIs such as `subprocess`, `os.system`,
+`os.popen`, `os.spawn*`, and `pty.spawn`, while allowing the narrow
+Playwright/browser-driver launches needed for Chromium automation. This profile
+is intentionally disruptive to shell-path probes: it is intended to measure a
+Python AI-agent runtime where general shell access is no longer available.
+
 The file protocol for each Docker run is:
 
 ```text

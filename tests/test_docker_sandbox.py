@@ -30,6 +30,7 @@ from docker_sandbox.profiles import (
     MINIMIZED_IMAGE_IMAGE_NAME,
     NETWORK_EGRESS_IMAGE_NAME,
     NETWORK_SOCKET_CONTROL_IMAGE_NAME,
+    NO_SHELL_ACCESS_IMAGE_NAME,
     PERSISTENCE_CONTROL_IMAGE_NAME,
     READONLY_FS_IMAGE_NAME,
     RESOURCE_LIMITS_IMAGE_NAME,
@@ -169,8 +170,12 @@ def test_runtime_sitecustomize_denies_modules_and_writable_code() -> None:
     assert "SANDBOX_DENY_METADATA_ENDPOINTS" in sitecustomize_text
     assert "SANDBOX_DENY_ALL_INTERFACE_BIND" in sitecustomize_text
     assert "SANDBOX_DENY_HARDWARE_DEVICE_ENUMERATION" in sitecustomize_text
+    assert "SANDBOX_DENY_PROCESS_SPAWN" in sitecustomize_text
     assert "_apply_socket_guards()" in sitecustomize_text
     assert "_apply_hardware_device_guards()" in sitecustomize_text
+    assert "_apply_process_spawn_guards()" in sitecustomize_text
+    assert "/playwright/driver/" in sitecustomize_text
+    assert "/ms-playwright/" in sitecustomize_text
     assert "/sys/bus/usb" in sitecustomize_text
     assert "/sys/class/bluetooth" in sitecustomize_text
     assert '"/sandbox-work"' in sitecustomize_text
@@ -1386,6 +1391,33 @@ def test_persistence_control_profile_adds_systemd_user_unit_guards(
     )
     assert "target=/tmp/sandbox-home/.config/systemd/user,readonly" in " ".join(command)
     assert "target=/tmp/sandbox-config/systemd/user,readonly" in " ".join(command)
+
+
+def test_no_shell_access_profile_adds_process_spawn_guard(tmp_path: Path) -> None:
+    """Verify no-shell-access denies general Python process spawning."""
+    persistence_profile = get_docker_profile("persistence-control")
+    no_shell_profile = get_docker_profile("no-shell-access")
+    configuration = _create_configuration(tmp_path, no_shell_profile)
+    run_directory = tmp_path / ".docker_sandbox" / "runs" / "run-test"
+
+    command = _build_docker_run_command(
+        configuration=configuration,
+        run_directory=run_directory,
+        container_name="sandbox-tester-run-test",
+        network_name="sandbox-tester-net-test",
+        remote_run_directory="/sandbox-work/run-test",
+        gateway_ip_address="172.20.0.2",
+    )
+
+    assert no_shell_profile.image_name == NO_SHELL_ACCESS_IMAGE_NAME
+    assert no_shell_profile.image_name != persistence_profile.image_name
+    assert no_shell_profile.image_build_arguments == (
+        persistence_profile.image_build_arguments
+    )
+    assert no_shell_profile.readonly_persistence_directories == (
+        persistence_profile.readonly_persistence_directories
+    )
+    assert "SANDBOX_DENY_PROCESS_SPAWN=1" in command
 
 
 def test_denied_executable_stubs_are_temporary_run_scaffolding(

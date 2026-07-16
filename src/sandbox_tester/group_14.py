@@ -991,13 +991,16 @@ class G14_T07:
 
     def _get_pip_config_paths(self) -> list[Path]:
         command = [sys.executable, "-m", "pip", "config", "debug"]
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (PermissionError, subprocess.TimeoutExpired, OSError):
+            return []
 
         if completed.returncode != 0:
             return []

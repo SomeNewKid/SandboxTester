@@ -7,6 +7,7 @@ import importlib.util
 import inspect
 import ipaddress
 import os
+import pty
 import socket
 import subprocess
 import sys
@@ -46,6 +47,7 @@ _DENIED_METADATA_NETWORKS = tuple(
 _ORIGINAL_SOCKET_CLASS = socket.socket
 _ORIGINAL_CREATE_CONNECTION = socket.create_connection
 _ORIGINAL_SPEC_FROM_FILE_LOCATION = importlib.util.spec_from_file_location
+_ORIGINAL_SUBPROCESS_POPEN = subprocess.Popen
 _ORIGINAL_SUBPROCESS_RUN = subprocess.run
 _ORIGINAL_PATH_EXISTS = Path.exists
 _ORIGINAL_PATH_GLOB = Path.glob
@@ -64,6 +66,12 @@ _DENIED_HARDWARE_COMMAND_MARKERS = frozenset(
         "ttyUSB",
         "video*",
         "video4linux2",
+    }
+)
+_ALLOWED_PROCESS_SPAWN_MARKERS = frozenset(
+    {
+        "/ms-playwright/",
+        "/playwright/driver/",
     }
 )
 
@@ -224,8 +232,73 @@ def _apply_hardware_device_guards() -> None:
     Path.iterdir = guarded_path_iterdir  # type: ignore[method-assign]
 
 
+def _apply_process_spawn_guards() -> None:
+    if not _process_spawn_denied():
+        return
+
+    def guarded_popen(args, *popen_args, **popen_kwargs):  # type: ignore[no-untyped-def]
+        _raise_if_process_spawn_denied(args)
+        return _ORIGINAL_SUBPROCESS_POPEN(args, *popen_args, **popen_kwargs)
+
+    def guarded_run(args, *run_args, **run_kwargs):  # type: ignore[no-untyped-def]
+        _raise_if_process_spawn_denied(args)
+        return _ORIGINAL_SUBPROCESS_RUN(args, *run_args, **run_kwargs)
+
+    def denied_os_system(command: object) -> int:
+        raise PermissionError("Process spawning is denied by sandbox profile")
+
+    def denied_os_popen(command, *args, **kwargs):  # type: ignore[no-untyped-def]
+        raise PermissionError("Process spawning is denied by sandbox profile")
+
+    def denied_spawn(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise PermissionError("Process spawning is denied by sandbox profile")
+
+    subprocess.Popen = guarded_popen
+    subprocess.run = guarded_run
+    subprocess.call = guarded_run
+    subprocess.check_call = guarded_run
+    subprocess.check_output = guarded_run
+    os.system = denied_os_system
+    os.popen = denied_os_popen
+    for name in (
+        "spawnl",
+        "spawnle",
+        "spawnlp",
+        "spawnlpe",
+        "spawnv",
+        "spawnve",
+        "spawnvp",
+        "spawnvpe",
+    ):
+        if hasattr(os, name):
+            setattr(os, name, denied_spawn)
+
+    if hasattr(pty, "spawn"):
+        pty.spawn = denied_spawn  # type: ignore[attr-defined]
+
+
 def _hardware_device_enumeration_denied() -> bool:
     return _enabled("SANDBOX_DENY_HARDWARE_DEVICE_ENUMERATION")
+
+
+def _process_spawn_denied() -> bool:
+    return _enabled("SANDBOX_DENY_PROCESS_SPAWN")
+
+
+def _raise_if_process_spawn_denied(args: object) -> None:
+    if _is_allowed_process_spawn(args):
+        return
+
+    raise PermissionError("Process spawning is denied by sandbox profile")
+
+
+def _is_allowed_process_spawn(args: object) -> bool:
+    text = _command_text(args)
+    if not text:
+        return False
+
+    normalized_text = text.replace("\\", "/")
+    return any(marker in normalized_text for marker in _ALLOWED_PROCESS_SPAWN_MARKERS)
 
 
 def _is_denied_hardware_command(args: object) -> bool:
@@ -359,5 +432,6 @@ _deny_writable_script_execution()
 _deny_writable_spec_from_file_location()
 _apply_socket_guards()
 _apply_hardware_device_guards()
+_apply_process_spawn_guards()
 sys.meta_path.insert(0, _DeniedWritableCodeFinder())
 sys.meta_path.insert(0, _DeniedModuleFinder())

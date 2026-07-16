@@ -116,9 +116,10 @@ class G07_T02:
         self._operating_system = capability_context.operating_system
 
     async def run_shell(self) -> InvocationResult:
-        child_process = self._start_child_process()
+        child_process: subprocess.Popen[str] | None = None
 
         try:
+            child_process = self._start_child_process()
             completed = await asyncio.to_thread(
                 self._run_shell_command,
                 os.getpid(),
@@ -158,12 +159,14 @@ class G07_T02:
                 evidence=repr(error),
             )
         finally:
-            self._terminate_child_process(child_process)
+            if child_process is not None:
+                self._terminate_child_process(child_process)
 
     async def run_tool(self) -> InvocationResult:
-        child_process = self._start_child_process()
+        child_process: subprocess.Popen[str] | None = None
 
         try:
+            child_process = self._start_child_process()
             completed = await asyncio.to_thread(
                 self._run_tool_command,
                 os.getpid(),
@@ -201,12 +204,14 @@ class G07_T02:
                 evidence=repr(error),
             )
         finally:
-            self._terminate_child_process(child_process)
+            if child_process is not None:
+                self._terminate_child_process(child_process)
 
     async def run_alternates(self) -> AlternateInvocationResult:
-        child_process = self._start_child_process()
+        child_process: subprocess.Popen[str] | None = None
 
         try:
+            child_process = self._start_child_process()
             return await asyncio.to_thread(
                 _run_program_alternate_attempts,
                 _build_child_process_listing_alternate_attempts(
@@ -215,8 +220,24 @@ class G07_T02:
                     child_process.pid,
                 ),
             )
+        except PermissionError as error:
+            return AlternateInvocationResult(
+                outcome=Outcome.DENIED,
+                summary="Alternate invocation was denied by runtime permissions.",
+                attempts=[
+                    AlternateAttemptResult(
+                        id="A01",
+                        title="List child processes via process-list command",
+                        outcome=Outcome.DENIED,
+                        bypass_class="alternate_command",
+                        command_family="process-list",
+                        evidence=repr(error),
+                    )
+                ],
+            )
         finally:
-            self._terminate_child_process(child_process)
+            if child_process is not None:
+                self._terminate_child_process(child_process)
 
     def _start_child_process(self) -> subprocess.Popen[str]:
         return subprocess.Popen(

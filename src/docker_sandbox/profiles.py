@@ -55,6 +55,8 @@ HARDWARE_DEVICE_CONTROL_IMAGE_NAME = (
 )
 PERSISTENCE_CONTROL_PROFILE_NAME = "persistence-control"
 PERSISTENCE_CONTROL_IMAGE_NAME = "sandbox-tester/docker-sandbox:persistence-control"
+NO_SHELL_ACCESS_PROFILE_NAME = "no-shell-access"
+NO_SHELL_ACCESS_IMAGE_NAME = "sandbox-tester/docker-sandbox:no-shell-access"
 
 _PROFILES: dict[str, DockerProfile] = {
     BASELINE_PROFILE_NAME: DockerProfile(
@@ -1075,6 +1077,21 @@ _PROFILES[PERSISTENCE_CONTROL_PROFILE_NAME] = replace(
         ].readonly_persistence_directories,
         "/tmp/sandbox-home/.config/systemd/user",
         "/tmp/sandbox-config/systemd/user",
+    ),
+)
+
+_PROFILES[NO_SHELL_ACCESS_PROFILE_NAME] = replace(
+    _PROFILES[PERSISTENCE_CONTROL_PROFILE_NAME],
+    name=NO_SHELL_ACCESS_PROFILE_NAME,
+    description=(
+        "Start from the persistence-control hardening profile so general "
+        "Python process and shell spawning can be denied while preserving the "
+        "narrow browser-driver launches needed by Playwright."
+    ),
+    image_name=NO_SHELL_ACCESS_IMAGE_NAME,
+    environment=(
+        *_PROFILES[PERSISTENCE_CONTROL_PROFILE_NAME].environment,
+        EnvironmentVariablePolicy("SANDBOX_DENY_PROCESS_SPAWN", "1"),
     ),
 )
 
